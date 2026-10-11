@@ -32,7 +32,6 @@ function Top({ title, sub, back, right }: { title: string; sub?: string; back?: 
 export function FolderList() {
   const { folders, kids } = useStore()
   const nav = useNavigate()
-  const canInstall = useCanInstall()
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
   const noFolder = kids.filter((k) => !k.folderId).length
@@ -47,9 +46,6 @@ export function FolderList() {
     <>
       <Top title="Carpetas" sub={`${folders.length} ${folders.length === 1 ? 'carpeta' : 'carpetas'} · ${plural(kids.length)}`} />
       <main className="content">
-        {canInstall && !isInstalled() && (
-          <button className="btn primary" style={{ background: 'var(--green)' }} onClick={installApp}>Instalar la app en este celular</button>
-        )}
         {folders.length === 0 && <div className="banner info">Crea una carpeta por cliente o grupo (por ejemplo, "Olimpic") para tener a los niños ordenados.</div>}
         {folders.map((f) => {
           const n = kids.filter((k) => k.folderId === f.id).length
