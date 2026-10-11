@@ -1,0 +1,22 @@
+rules_version = '2';
+// Reglas de seguridad de Firestore para la app TGMD-2.
+// Cada evaluador solo puede ver y cambiar sus propios datos (ownerId = su usuario).
+// Más adelante se agregará el rol "dueño" que puede ver los datos de todos.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function ownsExisting() { return signedIn() && resource.data.ownerId == request.auth.uid; }
+    function ownsNew() { return signedIn() && request.resource.data.ownerId == request.auth.uid; }
+
+    match /folders/{id} {
+      allow read, delete: if ownsExisting();
+      allow create: if ownsNew();
+      allow update: if ownsExisting() && ownsNew();
+    }
+    match /kids/{id} {
+      allow read, delete: if ownsExisting();
+      allow create: if ownsNew();
+      allow update: if ownsExisting() && ownsNew();
+    }
+  }
+}
