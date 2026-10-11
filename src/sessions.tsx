@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useStore, createSession, updateSession, deleteSession, scoreId, type Session, type SessionMode, type Kid, type Folder, type Score } from './store'
 import { progress } from './scoring'
-import { useSessionClips, deleteSessionClips, useStorageInfo, type ClipMeta } from './clips'
+import { useSessionClips, deleteSessionClips, deleteSessionVideos, videosMB, useStorageInfo, type ClipMeta } from './clips'
 import { CLIPS_PER_KID, MARKS_PER_KID } from './skills'
 import { ageText } from './age'
 import { Sheet, Icon, Top } from './ui'
@@ -91,12 +91,12 @@ export function SessionList() {
 // ---------------- Detalle de una sesión ----------------
 export function SessionView() {
   const { id = '' } = useParams()
-  const { sessions, kids, folders } = useStore()
+  const { sessions, kids, folders, scores } = useStore()
   const nav = useNavigate()
   const s = sessions.find((x) => x.id === id)
   const clips = useSessionClips(id)
   const storage = useStorageInfo()
-  const [sheet, setSheet] = useState<null | 'folders' | { folderId: string | null } | 'delete'>(null)
+  const [sheet, setSheet] = useState<null | 'folders' | { folderId: string | null } | 'delete' | 'videos'>(null)
   const [picked, setPicked] = useState<string[]>([])
 
   if (!s) return (<><Top title="Sesión" back="/sesiones" /><main className="content"><div className="empty">Esta sesión ya no existe.</div></main></>)
@@ -110,7 +110,7 @@ export function SessionView() {
   return (
     <>
       <Top title={sessionTitle(s, kids, folders)} sub={sessionKids.length ? `${dateText(s.date)} · ${plural(sessionKids.length)} · ${okCount(clips)} de ${sessionKids.length * CLIPS_PER_KID} videos` : `${dateText(s.date)} · Agrega a los niños`}
-        back="/sesiones" right={<button className="icon-btn" aria-label="Opciones de la sesión" onClick={() => setSheet('delete')}>{Icon.trash}</button>} />
+        back="/sesiones" right={<button className="icon-btn" aria-label="Eliminar la sesión completa" onClick={() => setSheet('delete')}>{Icon.trash}</button>} />
       <main className="content">
         <div className="field">
           <label htmlFor="sdate">Fecha del test</label>
@@ -153,6 +153,14 @@ export function SessionView() {
           <button onClick={() => setSheet('folders')} style={{ color: 'var(--blue)', borderColor: 'var(--blue)', fontWeight: 900 }}>+ De una carpeta</button>
           <button onClick={() => nav(`/nino/nuevo?sesion=${s.id}`)} style={{ color: 'var(--blue)', borderColor: 'var(--blue)', fontWeight: 900 }}>+ Niño nuevo</button>
         </div>
+        {videosMB(clips) > 0 && (
+          <button className="btn ghost" style={{ color: 'var(--red)', borderColor: '#F3C1BC', fontSize: 15 }} onClick={() => setSheet('videos')}>
+            Borrar solo los videos ({videosMB(clips) < 1 ? '<1' : Math.round(videosMB(clips))} MB)
+          </button>
+        )}
+        {clips && videosMB(clips) === 0 && okCount(clips) > 0 && [...clips.values()].some((c) => c.deleted) && (
+          <div className="meta" style={{ fontSize: 13, color: 'var(--muted)' }}>Los videos de esta sesión ya se borraron. Los puntajes e informes se conservan.</div>
+        )}
         {storage && (
           <div className="meta" style={{ fontSize: 13, color: 'var(--muted)' }}>
             Espacio usado por la app: {storage.usedMB} MB · libre aprox.: {(storage.freeMB / 1000).toFixed(1)} GB
@@ -200,6 +208,16 @@ export function SessionView() {
           <button className="btn primary" disabled={!picked.length} onClick={addPicked}>{picked.length ? `Agregar ${picked.length} a la sesión` : 'Elige uno o más niños'}</button>
         </Sheet>
       )}
+      {sheet === 'videos' && (() => {
+        const st = sessionStatus(s, scores, clips)
+        return (
+          <Sheet title="¿Borrar los videos de esta sesión?" onClose={() => setSheet(null)}>
+            <p>Se liberan unos {Math.max(1, Math.round(videosMB(clips)))} MB del celular. <strong>Se conservan</strong> la sesión, los niños, los puntajes, las conclusiones, los informes y el Excel.</p>
+            {!st.done && <div className="banner warn">Esta sesión todavía no está terminada ({st.label.toLowerCase()}). Sin los videos ya no podrás revisarlos para puntuar.</div>}
+            <button className="btn danger" onClick={async () => { await deleteSessionVideos(s.id); setSheet(null) }}>Sí, borrar solo los videos</button>
+          </Sheet>
+        )
+      })()}
       {sheet === 'delete' && (
         <Sheet title="¿Eliminar esta sesión?" onClose={() => setSheet(null)}>
           <p>Se borran también sus {okCount(clips)} videos de este celular. Los niños no se borran.</p>

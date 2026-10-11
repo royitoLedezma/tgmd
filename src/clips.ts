@@ -9,6 +9,7 @@ export interface ClipMeta {
   skillId: string
   attempt: number
   status: 'ok' | 'pendiente' // pendiente = se saltó
+  deleted?: boolean // el video se borró para liberar espacio (la grabación cuenta como hecha)
   mime: string
   size: number
   seconds: number
@@ -86,6 +87,26 @@ export async function deleteSessionClips(sessionId: string) {
     metas.forEach((m) => { t.objectStore('meta').delete(m.key); t.objectStore('blobs').delete(m.key) })
   })
   changed()
+}
+
+/** Borra solo los videos de una sesión (libera espacio). Se conserva el registro de qué se grabó. */
+export async function deleteSessionVideos(sessionId: string) {
+  const metas = await listSessionClips(sessionId)
+  await tx(['meta', 'blobs'], 'readwrite', (t) => {
+    metas.forEach((m) => {
+      t.objectStore('blobs').delete(m.key)
+      if (m.status === 'ok') t.objectStore('meta').put({ ...m, deleted: true, size: 0 })
+    })
+  })
+  changed()
+}
+
+/** Megabytes que ocupan los videos guardados de una sesión. */
+export function videosMB(clips: Map<string, ClipMeta> | null) {
+  if (!clips) return 0
+  let b = 0
+  clips.forEach((c) => { if (!c.deleted) b += c.size || 0 })
+  return b / 1e6
 }
 
 /** Videos de una sesión, como mapa clave → meta. Se actualiza solo. */
