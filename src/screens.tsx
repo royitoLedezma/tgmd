@@ -1,11 +1,11 @@
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   useStore, createFolder, renameFolder, deleteFolder, createKid, updateKid, deleteKid,
-  backupJson, restoreBackup, login, logout, type Kid, type Sex, type Side,
+  backupJson, restoreBackup, login, logout, updateSession, getState, type Kid, type Sex, type Side,
 } from './store'
 import { ageText, isOverMax } from './age'
-import { Sheet, Icon } from './ui'
+import { Sheet, Icon, Top } from './ui'
 import { useCanInstall, installApp, isInstalled } from './install'
 
 const NONE = 'sin'
@@ -15,17 +15,6 @@ function missing(k: Kid): string | null {
   if (!k.birthDate) return 'Falta la fecha de nacimiento'
   if (!k.sex) return 'Falta el sexo (necesario para Control de Objetos)'
   return null
-}
-
-function Top({ title, sub, back, right }: { title: string; sub?: string; back?: string; right?: ReactNode }) {
-  const nav = useNavigate()
-  return (
-    <header className="top">
-      {back && <button className="icon-btn" aria-label="Volver" onClick={() => nav(back)}>{Icon.back}</button>}
-      <div className="grow"><h1>{title}</h1>{sub && <span className="sub">{sub}</span>}</div>
-      {right}
-    </header>
-  )
 }
 
 // ---------------- Carpetas ----------------
@@ -196,6 +185,7 @@ export function KidForm() {
   const nav = useNavigate()
   const existing = kids.find((k) => k.id === id)
   const startFolder = params.get('carpeta')
+  const sessionId = params.get('sesion')
   const [name, setName] = useState(existing?.name ?? '')
   const [birthDate, setBirth] = useState(existing?.birthDate ?? '')
   const [sex, setSex] = useState<Sex>(existing?.sex ?? '')
@@ -209,14 +199,18 @@ export function KidForm() {
   if (id && id !== 'nuevo' && !existing) {
     return (<><Top title="Niño" back="/" /><main className="content"><div className="empty">No se encontró a este niño.</div></main></>)
   }
-  const backTo = `/carpeta/${existing ? existing.folderId ?? NONE : startFolder ?? NONE}`
+  const backTo = sessionId ? `/sesion/${sessionId}` : `/carpeta/${existing ? existing.folderId ?? NONE : startFolder ?? NONE}`
   const sides: [Side, string][] = [['D', 'Derecha'], ['I', 'Izquierda'], ['A', 'Ambidiestro'], ['N', 'No establecida']]
 
   const save = async () => {
     setSaving(true)
     const data = { name, birthDate, sex, hand, foot, eye, turn, folderId: folderId === NONE ? null : folderId }
     if (existing) await updateKid(existing.id, data)
-    else await createKid(data)
+    else {
+      const newKid = await createKid(data)
+      const sess = sessionId ? getState().sessions.find((x) => x.id === sessionId) : undefined
+      if (sess) { updateSession(sess.id, { kidIds: [...sess.kidIds, newKid] }); nav(`/sesion/${sess.id}`); return }
+    }
     nav(`/carpeta/${folderId}`)
   }
 
@@ -316,7 +310,7 @@ export function Settings() {
         </label>
         {msg && <div className={`banner ${msg.kind}`}>{msg.text}</div>}
         <div className="section-title">Versión</div>
-        <div className="meta" style={{ color: 'var(--muted)', fontSize: 14 }}>Etapa 1 · Carpetas y niños</div>
+        <div className="meta" style={{ color: 'var(--muted)', fontSize: 14 }}>Etapa 2 · Sesiones y grabación</div>
       </main>
     </>
   )

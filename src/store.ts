@@ -1,7 +1,8 @@
-// Datos de la app: carpetas y niños.
+// Datos de la app: carpetas, niños y sesiones de grabación.
 // Dos modos:
 //  - "local": sin Firebase configurado, todo se guarda en este dispositivo (localStorage).
 //  - "nube": con Firebase, se guarda en Firestore (funciona sin señal y sincroniza al volver).
+// Los videos NUNCA van a la nube: se guardan en el celular (ver clips.ts).
 import { useSyncExternalStore } from 'react'
 import { initializeApp } from 'firebase/app'
 import {
@@ -32,17 +33,28 @@ export interface Kid {
   ownerId: string
   createdAt: number
 }
+export type SessionMode = 'grupal' | 'individual'
+export interface Session {
+  id: string
+  date: string // AAAA-MM-DD
+  mode: SessionMode
+  kidIds: string[]
+  absent: string[]
+  ownerId: string
+  createdAt: number
+}
 
-interface State {
+interface Data { folders: Folder[]; kids: Kid[]; sessions: Session[] }
+interface State extends Data {
   mode: 'local' | 'nube'
   ready: boolean
   user: { uid: string; name: string; email: string } | null
-  folders: Folder[]
-  kids: Kid[]
   error: string | null
 }
+type Col = keyof Data
 
-const cloudEnabled = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId)
+// VITE_LOCAL=1 fuerza el modo local (solo para pruebas automáticas).
+const cloudEnabled = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId) && import.meta.env.VITE_LOCAL !== '1'
 const LOCAL_KEY = 'tgmd-datos-v1'
 
 let state: State = {
@@ -51,6 +63,7 @@ let state: State = {
   user: cloudEnabled ? null : { uid: 'local', name: 'Este dispositivo', email: '' },
   folders: [],
   kids: [],
+  sessions: [],
   error: null,
 }
 const listeners = new Set<() => void>()
@@ -65,9 +78,18 @@ function subscribe(l: () => void) {
 export function useStore(): State {
   return useSyncExternalStore(subscribe, () => state)
 }
+export const getState = () => state
 
-const newId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
+export const newId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36)
 const byName = <T extends { name: string }>(a: T, b: T) => a.name.localeCompare(b.name, 'es')
+const byNewest = (a: Session, b: Session) => b.createdAt - a.createdAt
+function sorted(data: Partial<Data>): Partial<Data> {
+  const out: Partial<Data> = {}
+  if (data.folders) out.folders = [...data.folders].sort(byName)
+  if (data.kids) out.kids = [...data.kids].sort(byName)
+  if (data.sessions) out.sessions = [...data.sessions].sort(byNewest)
+  return out
+}
 
 // ---------- Modo local ----------
 function loadLocal() {
@@ -75,13 +97,14 @@ function loadLocal() {
     const raw = localStorage.getItem(LOCAL_KEY)
     if (raw) {
       const d = JSON.parse(raw)
-      set({ folders: (d.folders || []).sort(byName), kids: (d.kids || []).sort(byName) })
+      set(sorted({ folders: d.folders || [], kids: d.kids || [], sessions: d.sessions || [] }))
     }
   } catch { /* datos dañados: se empieza vacío */ }
 }
-function saveLocal(folders: Folder[], kids: Kid[]) {
-  try { localStorage.setItem(LOCAL_KEY, JSON.stringify({ folders, kids })) } catch { /* sin espacio */ }
-  set({ folders: [...folders].sort(byName), kids: [...kids].sort(byName) })
+function saveLocal(patch: Partial<Data>) {
+  const next: Data = { folders: state.folders, kids: state.kids, sessions: state.sessions, ...patch }
+  try { localStorage.setItem(LOCAL_KEY, JSON.stringify(next)) } catch { /* sin espacio */ }
+  set(sorted(next))
 }
 
 // ---------- Modo nube ----------
@@ -91,7 +114,7 @@ let unsubs: Array<() => void> = []
 function readError(e: { code?: string; message?: string }) {
   const code = String(e?.code || '')
   set({ error: code.includes('permission-denied')
-    ? 'Firebase no deja leer tus datos: revisa que las reglas de Firestore estén publicadas.'
+    ? 'Firebase no deja leer tus datos: revisa que las reglas de Firestore estén publicadas (y actualizadas).'
     : `No se pudieron leer los datos de la nube (${code || e?.message || 'error'}).` })
 }
 
@@ -103,11 +126,14 @@ if (cloudEnabled) {
   const auth = getAuth(app)
   onAuthStateChanged(auth, (u: User | null) => {
     unsubs.forEach((f) => f()); unsubs = []
-    if (!u) { set({ user: null, ready: true, folders: [], kids: [] }); return }
+    if (!u) { set({ user: null, ready: true, folders: [], kids: [], sessions: [] }); return }
     set({ user: { uid: u.uid, name: u.displayName || '', email: u.email || '' }, ready: true })
-    const mine = (c: string) => query(collection(db!, c), where('ownerId', '==', u.uid))
-    unsubs.push(onSnapshot(mine('folders'), (s) => set({ folders: s.docs.map((d) => d.data() as Folder).sort(byName) }), readError))
-    unsubs.push(onSnapshot(mine('kids'), (s) => set({ kids: s.docs.map((d) => d.data() as Kid).sort(byName) }), readError))
+    const listen = (c: Col) => unsubs.push(onSnapshot(
+      query(collection(db!, c), where('ownerId', '==', u.uid)),
+      (s) => set(sorted({ [c]: s.docs.map((d) => d.data()) } as Partial<Data>)),
+      readError,
+    ))
+    listen('folders'); listen('kids'); listen('sessions')
   })
 } else {
   loadLocal()
@@ -133,14 +159,14 @@ export async function logout() {
   if (cloudEnabled) await signOut(getAuth())
 }
 
-// ---------- Acciones ----------
+// ---------- Escritura genérica ----------
 // Las escrituras no se esperan: Firestore actualiza la pantalla al instante (también sin señal)
 // y sincroniza en segundo plano. Si el servidor rechaza un cambio, se muestra el error.
 function bg(p: Promise<unknown>) {
   p.catch((e) => {
     const code = String((e as { code?: string })?.code || '')
     const msg = code.includes('permission-denied')
-      ? 'Firebase rechazó el cambio: revisa que las reglas de Firestore estén publicadas.'
+      ? 'Firebase rechazó el cambio: revisa que las reglas de Firestore estén publicadas (y actualizadas).'
       : code.includes('not-found')
         ? 'No se encontró la base de datos de Firestore: revisa que esté creada.'
         : `No se pudo guardar en la nube (${code || (e as Error)?.message || 'error'}).`
@@ -150,18 +176,30 @@ function bg(p: Promise<unknown>) {
 export function clearError() { set({ error: null }) }
 const uid = () => state.user?.uid || 'local'
 
+type Item = { id: string }
+function put<C extends Col>(c: C, item: Data[C][number]) {
+  if (db) bg(setDoc(doc(db, c, (item as Item).id), item))
+  else saveLocal({ [c]: [...(state[c] as Item[]).filter((x) => x.id !== (item as Item).id), item] } as Partial<Data>)
+}
+function patchItem<C extends Col>(c: C, id: string, patch: Partial<Data[C][number]>) {
+  if (db) bg(updateDoc(doc(db, c, id), patch as unknown as Record<string, never>))
+  else saveLocal({ [c]: (state[c] as Item[]).map((x) => (x.id === id ? { ...x, ...patch } : x)) } as Partial<Data>)
+}
+function remove(c: Col, id: string) {
+  if (db) bg(deleteDoc(doc(db, c, id)))
+  else saveLocal({ [c]: (state[c] as Item[]).filter((x) => x.id !== id) } as Partial<Data>)
+}
+
+// ---------- Carpetas ----------
 export async function createFolder(name: string): Promise<string> {
   const f: Folder = { id: newId(), name: name.trim() || 'Carpeta nueva', ownerId: uid(), createdAt: Date.now() }
-  if (db) bg(setDoc(doc(db, 'folders', f.id), f))
-  else saveLocal([...state.folders, f], state.kids)
+  put('folders', f)
   return f.id
 }
 
 export async function renameFolder(id: string, name: string) {
   const n = name.trim()
-  if (!n) return
-  if (db) bg(updateDoc(doc(db, 'folders', id), { name: n }))
-  else saveLocal(state.folders.map((f) => (f.id === id ? { ...f, name: n } : f)), state.kids)
+  if (n) patchItem('folders', id, { name: n })
 }
 
 /** Elimina una carpeta. keepKids = true pasa sus niños a "Sin carpeta"; false los borra. */
@@ -176,49 +214,61 @@ export async function deleteFolder(id: string, keepKids: boolean) {
     const kids = keepKids
       ? state.kids.map((k) => (k.folderId === id ? { ...k, folderId: null } : k))
       : state.kids.filter((k) => k.folderId !== id)
-    saveLocal(state.folders.filter((f) => f.id !== id), kids)
+    saveLocal({ folders: state.folders.filter((f) => f.id !== id), kids })
   }
 }
 
+// ---------- Niños ----------
 export type KidInput = Omit<Kid, 'id' | 'ownerId' | 'createdAt'>
 
 export async function createKid(data: KidInput): Promise<string> {
   const k: Kid = { ...data, name: data.name.trim() || 'Niño nuevo', id: newId(), ownerId: uid(), createdAt: Date.now() }
-  if (db) bg(setDoc(doc(db, 'kids', k.id), k))
-  else saveLocal(state.folders, [...state.kids, k])
+  put('kids', k)
   return k.id
 }
+export async function updateKid(id: string, patch: Partial<KidInput>) { patchItem('kids', id, patch) }
+export async function deleteKid(id: string) { remove('kids', id) }
 
-export async function updateKid(id: string, patch: Partial<KidInput>) {
-  if (db) bg(updateDoc(doc(db, 'kids', id), patch))
-  else saveLocal(state.folders, state.kids.map((k) => (k.id === id ? { ...k, ...patch } : k)))
+// ---------- Sesiones ----------
+export function today(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
-
-export async function deleteKid(id: string) {
-  if (db) bg(deleteDoc(doc(db, 'kids', id)))
-  else saveLocal(state.folders, state.kids.filter((k) => k.id !== id))
+export function createSession(mode: SessionMode = 'grupal'): string {
+  const s: Session = { id: newId(), date: today(), mode, kidIds: [], absent: [], ownerId: uid(), createdAt: Date.now() }
+  put('sessions', s)
+  return s.id
 }
+export function updateSession(id: string, patch: Partial<Omit<Session, 'id' | 'ownerId' | 'createdAt'>>) {
+  patchItem('sessions', id, patch)
+}
+export function deleteSession(id: string) { remove('sessions', id) }
 
 // ---------- Respaldo ----------
 export function backupJson(): string {
-  return JSON.stringify({ app: 'tgmd', version: 1, fecha: new Date().toISOString(), folders: state.folders, kids: state.kids }, null, 2)
+  return JSON.stringify({
+    app: 'tgmd', version: 2, fecha: new Date().toISOString(),
+    folders: state.folders, kids: state.kids, sessions: state.sessions,
+  }, null, 2)
 }
 
 /** Restaura un respaldo. Agrega o reemplaza por id; no borra lo que ya existe. */
 export async function restoreBackup(text: string): Promise<number> {
   const d = JSON.parse(text)
   if (d.app !== 'tgmd') throw new Error('El archivo no es un respaldo de esta app')
-  const folders: Folder[] = (d.folders || []).map((f: Folder) => ({ ...f, ownerId: uid() }))
-  const kids: Kid[] = (d.kids || []).map((k: Kid) => ({ ...k, ownerId: uid() }))
+  const mine = <T>(xs: T[] | undefined) => (xs || []).map((x) => ({ ...x, ownerId: uid() }))
+  const incoming: Data = { folders: mine(d.folders), kids: mine(d.kids), sessions: mine(d.sessions) }
   if (db) {
     const b = writeBatch(db)
-    folders.forEach((f) => b.set(doc(db!, 'folders', f.id), f))
-    kids.forEach((k) => b.set(doc(db!, 'kids', k.id), k))
+    ;(Object.keys(incoming) as Col[]).forEach((c) => (incoming[c] as Item[]).forEach((x) => b.set(doc(db!, c, x.id), x)))
     bg(b.commit())
   } else {
-    const fm = new Map(state.folders.map((f) => [f.id, f])); folders.forEach((f) => fm.set(f.id, f))
-    const km = new Map(state.kids.map((k) => [k.id, k])); kids.forEach((k) => km.set(k.id, k))
-    saveLocal([...fm.values()], [...km.values()])
+    const merge = <T extends Item>(a: T[], b: T[]) => { const m = new Map(a.map((x) => [x.id, x])); b.forEach((x) => m.set(x.id, x)); return [...m.values()] }
+    saveLocal({
+      folders: merge(state.folders, incoming.folders),
+      kids: merge(state.kids, incoming.kids),
+      sessions: merge(state.sessions, incoming.sessions),
+    })
   }
-  return folders.length + kids.length
+  return incoming.folders.length + incoming.kids.length + incoming.sessions.length
 }
