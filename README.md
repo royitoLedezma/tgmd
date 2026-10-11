@@ -10,8 +10,8 @@ App web instalable (PWA) para grabar, puntuar y generar informes del TGMD-2.
 - [x] Etapa 1 · Carpetas y niños, respaldo
 - [x] Etapa 2 · Grabación
 - [x] Etapa 3 · Puntuación con video
-- [ ] Etapa 4 · Cálculos y tablas normativas
-- [ ] Etapa 5 · Excel e informes
+- [x] Etapa 4 · Cálculos y tablas normativas
+- [x] Etapa 5 · Excel e informes
 - [ ] Etapa 6 · Prueba real
 
 ## Para desarrolladores

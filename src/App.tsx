@@ -5,12 +5,13 @@ import { SessionList, SessionView } from './sessions'
 import { Recorder } from './recorder'
 import { ScoreKids, ScoreSkill } from './scoring'
 import { ResultList, ResultView } from './results'
+import { ReportScreen } from './report'
 import { BottomNav } from './ui'
 
 function Shell() {
   const { error } = useStore()
   const loc = useLocation()
-  const fullScreen = loc.pathname.endsWith('/grabar') || /\/puntuar\/[^/]+\/[^/]+$/.test(loc.pathname)
+  const fullScreen = loc.pathname.endsWith('/grabar') || loc.pathname.includes('/informe') || /\/puntuar\/[^/]+\/[^/]+$/.test(loc.pathname)
   return (
     <div className="app">
       {error && (
@@ -31,6 +32,8 @@ function Shell() {
         <Route path="/sesion/:id/puntuar/:kidId/:skillId" element={<ScoreSkill />} />
         <Route path="/sesion/:id/resultados" element={<ResultList />} />
         <Route path="/sesion/:id/resultados/:kidId" element={<ResultView />} />
+        <Route path="/sesion/:id/informe" element={<ReportScreen />} />
+        <Route path="/sesion/:id/informe/:kidId" element={<ReportScreen />} />
         <Route path="/ajustes" element={<Settings />} />
       </Routes>
       {!fullScreen && <BottomNav />}

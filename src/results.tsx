@@ -1,4 +1,4 @@
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useStore, scoreId, type Kid, type Session } from './store'
 import { computeResult, monthsText, addMonths, dateFromIso, type SubtestResult } from './calc'
 import { Icon, Top } from './ui'
@@ -36,6 +36,9 @@ export function ResultList() {
     <>
       <Top title="Resultados" sub={dateText(s.date)} back={`/sesion/${s.id}`} />
       <main className="content">
+        {list.length > 0 && (
+          <Link to={`/sesion/${s.id}/informe`} className="btn primary" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none' }}>Informes y Excel de todo el grupo</Link>
+        )}
         {!norms && <div className="banner warn">Faltan las tablas normativas. Cárgalas en <Link to="/ajustes">Ajustes</Link> para ver puntajes estándar, percentiles, edad equivalente y GMQ.</div>}
         {list.map((k) => {
           const r = computeResult(k, scores.find((x) => x.id === scoreId(s.id, k.id)), s.date, norms)
@@ -91,6 +94,7 @@ export function ResultView() {
   const next = addMonths(s.date, 3)
   const earliest = addMonths(s.date, 1)
   const nextIsPast = dateFromIso(next) < new Date()
+  const nav = useNavigate()
 
   return (
     <>
@@ -102,6 +106,7 @@ export function ResultView() {
           {r.overMax && r.normMonths !== null && <span className="tag-info">Mayor de 10 años: se calcula con normas de {monthsText(r.normMonths)} (10 años 11 meses)</span>}
         </div>
 
+        <button className="btn primary" onClick={() => nav(`/sesion/${s.id}/informe/${kid.id}`)}>Informe gráfico · PDF · Excel</button>
         {r.warnings.map((w) => <div key={w} className="banner warn">{w}</div>)}
         {soon && <div className="banner warn">{soon}</div>}
 

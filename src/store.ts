@@ -53,6 +53,8 @@ export interface Score {
   sessionId: string
   kidId: string
   marks: Record<string, [Mark, Mark]>
+  conclusions?: string
+  suggestions?: string
   ownerId: string
   createdAt: number
 }
@@ -290,6 +292,25 @@ export function setMarks(sessionId: string, kidId: string, key: string, value: [
     saveLocal({ scores: [...state.scores.filter((x) => x.id !== id), sc] })
   }
 }
+
+/** Guarda las conclusiones y sugerencias del informe de un niño. */
+export function setReportText(sessionId: string, kidId: string, patch: { conclusions?: string; suggestions?: string }) {
+  const id = scoreId(sessionId, kidId)
+  const existing = state.scores.find((x) => x.id === id)
+  if (db) {
+    const base = existing ? {} : { id, sessionId, kidId, createdAt: Date.now(), marks: {} }
+    bg(setDoc(doc(db, 'scores', id), { ...base, ownerId: uid(), ...patch }, { merge: true }))
+  } else {
+    const sc: Score = existing ? { ...existing, ...patch } : { id, sessionId, kidId, ownerId: uid(), createdAt: Date.now(), marks: {}, ...patch }
+    saveLocal({ scores: [...state.scores.filter((x) => x.id !== id), sc] })
+  }
+}
+
+const EVAL_KEY = 'tgmd-evaluador'
+export function evaluatorName(): string {
+  try { return localStorage.getItem(EVAL_KEY) || state.user?.name || '' } catch { return state.user?.name || '' }
+}
+export function setEvaluatorName(n: string) { try { localStorage.setItem(EVAL_KEY, n) } catch { /* sin espacio */ } }
 
 // ---------- Tablas normativas ----------
 /** Guarda las tablas del manual en la cuenta del evaluador. Devuelve false si el archivo no es válido. */

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   useStore, createFolder, renameFolder, deleteFolder, createKid, updateKid, deleteKid,
-  backupJson, restoreBackup, login, logout, saveNorms, updateSession, getState, type Kid, type Sex, type Side,
+  backupJson, restoreBackup, login, logout, saveNorms, evaluatorName, setEvaluatorName, updateSession, getState, type Kid, type Sex, type Side,
 } from './store'
 import { ageText, isOverMax } from './age'
 import { Sheet, Icon, Top } from './ui'
@@ -301,6 +301,11 @@ export function Settings() {
             <button className="btn ghost" style={{ width: 'auto', padding: '0 14px', height: 44, fontSize: 15 }} onClick={logout}>Salir</button>
           </div>
         )}
+        <div className="section-title">Evaluador</div>
+        <div className="field">
+          <label htmlFor="evname">Nombre que aparece en el Excel</label>
+          <input id="evname" className="input" defaultValue={evaluatorName()} onChange={(e) => setEvaluatorName(e.target.value)} placeholder="Nombre y apellido" />
+        </div>
         <div className="section-title">Tablas normativas (privadas)</div>
         {norms
           ? <div className="banner ok">Tablas cargadas en tu cuenta. Se usan para el puntaje estándar, percentil, edad equivalente y GMQ.</div>
@@ -325,7 +330,7 @@ export function Settings() {
         </label>
         {msg && <div className={`banner ${msg.kind}`}>{msg.text}</div>}
         <div className="section-title">Versión</div>
-        <div className="meta" style={{ color: 'var(--muted)', fontSize: 14 }}>Etapa 4 · Cálculos y tablas normativas</div>
+        <div className="meta" style={{ color: 'var(--muted)', fontSize: 14 }}>Etapa 5 · Excel e informes</div>
       </main>
     </>
   )

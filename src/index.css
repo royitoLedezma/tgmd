@@ -85,3 +85,16 @@ a { color: var(--blue); }
 
 .empty { text-align: center; color: var(--muted); padding: 24px; font-size: 15px; }
 .section-title { font-size: 14px; font-weight: 700; color: var(--muted); margin-top: 6px; }
+
+/* ---------- Informe imprimible ---------- */
+.print-only { display: none; }
+@media print {
+  @page { size: letter; margin: 0; }
+  html, body, #root, .app { background: #fff !important; max-width: none !important; }
+  .no-print, .screen-only, .nav { display: none !important; }
+  .print-only { display: block !important; }
+  .report-wrap { padding: 0 !important; gap: 0 !important; display: block !important; }
+  .report-scale { zoom: 1 !important; }
+  .report-page { page-break-after: always; break-after: page; }
+  .report-page:last-child { page-break-after: auto; break-after: auto; }
+}
