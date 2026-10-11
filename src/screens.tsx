@@ -6,6 +6,7 @@ import {
 } from './store'
 import { ageText, isOverMax } from './age'
 import { Sheet, Icon } from './ui'
+import { useCanInstall, installApp, isInstalled } from './install'
 
 const NONE = 'sin'
 const plural = (n: number) => `${n} ${n === 1 ? 'niño' : 'niños'}`
@@ -31,6 +32,7 @@ function Top({ title, sub, back, right }: { title: string; sub?: string; back?: 
 export function FolderList() {
   const { folders, kids } = useStore()
   const nav = useNavigate()
+  const canInstall = useCanInstall()
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
   const noFolder = kids.filter((k) => !k.folderId).length
@@ -45,6 +47,9 @@ export function FolderList() {
     <>
       <Top title="Carpetas" sub={`${folders.length} ${folders.length === 1 ? 'carpeta' : 'carpetas'} · ${plural(kids.length)}`} />
       <main className="content">
+        {canInstall && !isInstalled() && (
+          <button className="btn primary" style={{ background: 'var(--green)' }} onClick={installApp}>Instalar la app en este celular</button>
+        )}
         {folders.length === 0 && <div className="banner info">Crea una carpeta por cliente o grupo (por ejemplo, "Olimpic") para tener a los niños ordenados.</div>}
         {folders.map((f) => {
           const n = kids.filter((k) => k.folderId === f.id).length
@@ -305,6 +310,7 @@ export function Settings() {
             <button className="btn ghost" style={{ width: 'auto', padding: '0 14px', height: 44, fontSize: 15 }} onClick={logout}>Salir</button>
           </div>
         )}
+        <InstallBlock />
         <div className="section-title">Respaldo</div>
         <div className="banner info">Guarda una copia de tus carpetas y niños ({folders.length} carpetas, {plural(kids.length)}) en un archivo. Puedes subirlo a tu Drive.</div>
         <button className="btn primary" onClick={download}>Descargar respaldo</button>
@@ -316,6 +322,24 @@ export function Settings() {
         <div className="section-title">Versión</div>
         <div className="meta" style={{ color: 'var(--muted)', fontSize: 14 }}>Etapa 1 · Carpetas y niños</div>
       </main>
+    </>
+  )
+}
+
+function InstallBlock() {
+  const can = useCanInstall()
+  if (isInstalled()) return null
+  return (
+    <>
+      <div className="section-title">Instalar en el celular</div>
+      {can ? (
+        <button className="btn primary" onClick={installApp}>Instalar app</button>
+      ) : (
+        <div className="banner info">
+          Abre esta página en <strong>Chrome</strong>, toca los tres puntos ⋮ (arriba a la derecha) y elige
+          <strong> “Instalar app”</strong> o <strong>“Agregar a la pantalla principal”</strong>.
+        </div>
+      )}
     </>
   )
 }

@@ -24,7 +24,8 @@ export function ageText(birth: string, on?: Date): string {
   if (!a) return 'Sin fecha de nacimiento'
   const y = a.years === 1 ? 'año' : 'años'
   const mo = a.months === 1 ? 'mes' : 'meses'
-  return `${a.years} ${y} ${a.months} ${mo}`
+  const d = a.days === 1 ? 'día' : 'días'
+  return `${a.years} ${y}, ${a.months} ${mo}, ${a.days} ${d}`
 }
 
 /** El TGMD-2 tiene normas de 3 a 10 años 11 meses. */
