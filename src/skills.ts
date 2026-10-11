@@ -9,7 +9,7 @@ export const SKILLS: Skill[] = [
   { id: 'correr', name: 'Correr', sheetName: 'Correr', subtest: 'loc', criteria: [
     { short: 'Brazos en oposición, codos doblados', full: 'Brazos se mueven en oposición a las piernas y los codos doblados.' },
     { short: 'Ambos pies en el aire', full: 'Breve periodo donde ambos pies están fuera del suelo.' },
-    { short: 'Aterrizaje con talón o punta', full: 'No aterriza delante de la cadera o con pie plano y pesado.' },
+    { short: 'Aterrizaje con todo el pie o con metatarso', full: 'No aterriza delante de la cadera o con pie plano y pesado.' },
     { short: 'Pierna libre a ~90°', full: 'La pierna de no soporte está doblada aproximadamente a 90 grados.' },
   ] },
   { id: 'galopar', name: 'Galopar', sheetName: 'Galope', subtest: 'loc', criteria: [
