@@ -31,6 +31,16 @@ function nextSlot(order: Slot[], s: Session, clips: Map<string, ClipMeta>, from:
   return null
 }
 
+/** Siguiente en el orden, aunque ya esté grabado (para seguir en orden después de elegir uno a mano). */
+function followingSlot(order: Slot[], s: Session, from: Slot): Slot | null {
+  const key = (x: Slot) => `${x.kidId}|${x.skillId}|${x.attempt}`
+  const start = order.findIndex((x) => key(x) === key(from))
+  for (let i = start + 1; i < order.length; i++) {
+    if (!s.absent.includes(order[i].kidId)) return order[i]
+  }
+  return null
+}
+
 function pickMime(): string {
   const options = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
   return options.find((m) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m)) || ''
@@ -56,13 +66,19 @@ export function Recorder() {
   const [log, setLog] = useState<{ slot: Slot; ok: boolean }[]>([])
   const [picker, setPicker] = useState<Slot | null>(null)
   const [review, setReview] = useState<{ slot: Slot; url: string } | null>(null)
+  // manual = el evaluador eligió qué grabar: se sigue en orden desde ahí, aunque ya esté grabado.
+  const [manual, setManual] = useState(false)
 
   const kidOf = useCallback((kidId: string): Kid | undefined => kids.find((k) => k.id === kidId), [kids])
 
   // Primer video por grabar, cuando ya se cargó la lista de videos.
+  const initialized = useRef(false)
   useEffect(() => {
-    if (s && clips && !cur) setCur(nextSlot(order, s, clips, null) ?? nextSlot(order, s, clips, null, true))
-  }, [s, clips, cur, order])
+    if (s && clips && !initialized.current) {
+      initialized.current = true
+      setCur(nextSlot(order, s, clips, null) ?? nextSlot(order, s, clips, null, true))
+    }
+  }, [s, clips, order])
 
   // Cámara trasera, sin sonido, 720p.
   useEffect(() => {
@@ -91,6 +107,13 @@ export function Recorder() {
     }
   }, [])
 
+  // Al volver de la pantalla final, la vista de cámara se vuelve a conectar.
+  useEffect(() => {
+    if (videoRef.current && streamRef.current && videoRef.current.srcObject !== streamRef.current) {
+      videoRef.current.srcObject = streamRef.current
+    }
+  })
+
   useEffect(() => {
     if (!recording) return
     const t = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt.current) / 1000)), 250)
@@ -99,9 +122,15 @@ export function Recorder() {
 
   if (!s) return <main className="content"><div className="empty">Esta sesión ya no existe.</div></main>
 
+  const nextFor = (from: Slot, updated: Map<string, ClipMeta>) =>
+    (manual ? followingSlot(order, s, from) : null) ?? nextSlot(order, s, updated, from)
   const goNext = (from: Slot, updated: Map<string, ClipMeta>) => {
-    setCur(nextSlot(order, s, updated, from))
+    const n = nextFor(from, updated)
+    if (!n || (manual && !followingSlot(order, s, from))) setManual(false)
+    setCur(n)
   }
+  const pick = (slot: Slot) => { setManual(true); setCur(slot) }
+  const jumpToPending = () => { setManual(false); setCur(clips ? nextSlot(order, s, clips, cur) : null) }
 
   const start = () => {
     const stream = streamRef.current
@@ -153,8 +182,9 @@ export function Recorder() {
   const done = clips ? [...clips.values()].filter((c) => c.status === 'ok').length : 0
   const pending = clips ? [...clips.values()].filter((c) => c.status === 'pendiente').length : 0
   const curExists = cur && clips?.get(clipKey(s.id, cur.kidId, cur.skillId, cur.attempt))?.status === 'ok'
-  const after = cur && clips ? nextSlot(order, s, clips, cur) : null
+  const after = cur && clips ? nextFor(cur, clips) : null
   const lastOk = [...log].reverse().find((l) => l.ok)
+  const absentNames = s.absent.map((k) => first(kidOf(k)?.name ?? '')).filter(Boolean)
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: '#0F1720', color: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 560, margin: '0 auto' }}>
@@ -172,61 +202,74 @@ export function Recorder() {
       </div>
 
       {cur ? (
-        <button onClick={() => !recording && setPicker(cur)} disabled={recording}
-          style={{ margin: '0 16px', background: '#fff', color: '#1B2733', border: 'none', borderRadius: 16, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left' }}>
-          <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ fontSize: 28, fontWeight: 900, lineHeight: 1.1 }}>{kidOf(cur.kidId)?.name}</span>
-            <span style={{ fontSize: 19, fontWeight: 700, color: '#0A6FA8' }}>{skillById(cur.skillId)?.name} · Intento {cur.attempt}</span>
-            {curExists && <span style={{ fontSize: 13, fontWeight: 700, color: '#92400E' }}>Ya está grabado: si grabas, se reemplaza</span>}
-          </span>
-          {!recording && <span style={{ fontSize: 12, fontWeight: 900, color: '#0A6FA8', textAlign: 'center' }}>⇄<br />Cambiar</span>}
-        </button>
+        <>
+          <button onClick={() => !recording && setPicker(cur)} disabled={recording}
+            style={{ margin: '0 16px', background: '#fff', color: '#1B2733', border: 'none', borderRadius: 16, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left' }}>
+            <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontSize: 28, fontWeight: 900, lineHeight: 1.1 }}>{kidOf(cur.kidId)?.name}</span>
+              <span style={{ fontSize: 19, fontWeight: 700, color: '#0A6FA8' }}>{skillById(cur.skillId)?.name} · Intento {cur.attempt}</span>
+              {curExists && <span style={{ fontSize: 13, fontWeight: 700, color: '#92400E' }}>Ya está grabado: si grabas, se reemplaza</span>}
+            </span>
+            {!recording && <span style={{ fontSize: 12, fontWeight: 900, color: '#0A6FA8', textAlign: 'center' }}>⇄<br />Cambiar</span>}
+          </button>
+          {manual && !recording && (
+            <button onClick={jumpToPending} style={{ margin: '8px 16px 0', background: 'transparent', color: '#8CC8F0', border: '1.5px solid #2A3642', borderRadius: 12, height: 40, fontSize: 14, fontWeight: 700 }}>
+              {clips && nextSlot(order, s, clips, cur) ? 'Ir a lo que falta grabar →' : 'Listo, terminar →'}
+            </button>
+          )}
+
+          <div style={{ flex: 1, position: 'relative', margin: '12px 16px', borderRadius: 16, overflow: 'hidden', background: '#1C2731', border: `3px solid ${recording ? '#FF4D5E' : '#1C2731'}` }}>
+            <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <div style={{ position: 'absolute', top: 10, left: 10, background: 'rgba(0,0,0,.55)', borderRadius: 8, padding: '6px 10px', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {recording ? <><span style={{ width: 10, height: 10, borderRadius: 5, background: '#FF4D5E' }} /> Grabando 00:{String(elapsed).padStart(2, '0')}</> : 'Listo para grabar'}
+            </div>
+            {camError && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, textAlign: 'center', fontSize: 15 }}>{camError}</div>}
+          </div>
+
+          <div style={{ textAlign: 'center', fontSize: 14, color: '#B8C4CF' }}>Después: <strong style={{ color: '#fff' }}>{after ? label(after) : 'fin de la sesión'}</strong></div>
+
+          <div style={{ padding: '12px 16px', display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', alignItems: 'center' }}>
+            <button onClick={skip} disabled={recording} style={{ justifySelf: 'start', background: '#2A3642', color: '#fff', border: 'none', borderRadius: 12, padding: '0 16px', height: 48, fontSize: 15, fontWeight: 700 }}>Saltar</button>
+            <button aria-label={recording ? 'Detener y guardar' : 'Grabar'} disabled={!!camError} onClick={recording ? stop : start}
+              style={{ justifySelf: 'center', width: 84, height: 84, borderRadius: 42, border: '5px solid #fff', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, opacity: camError ? 0.4 : 1 }}>
+              <span style={recording ? { width: 30, height: 30, borderRadius: 6, background: '#FF4D5E' } : { width: 62, height: 62, borderRadius: 31, background: '#FF4D5E' }} />
+            </button>
+            <button onClick={() => setPicker(cur)} disabled={recording} style={{ justifySelf: 'end', background: '#2A3642', color: '#fff', border: 'none', borderRadius: 12, padding: '0 16px', height: 48, fontSize: 15, fontWeight: 700 }}>Elegir</button>
+          </div>
+
+          <div style={{ padding: '0 16px calc(12px + env(safe-area-inset-bottom))', display: 'flex', gap: 6, flexWrap: 'wrap', minHeight: 30 }}>
+            {lastOk && !recording && (
+              <button onClick={() => openReview(lastOk.slot)} style={{ fontSize: 13, fontWeight: 700, padding: '6px 10px', borderRadius: 8, border: 'none', background: '#1F3A33', color: '#8FE8C8' }}>
+                ▶ Ver último: {label(lastOk.slot)}
+              </button>
+            )}
+            {log.slice(-2).filter((l) => !l.ok).map((l, i) => (
+              <span key={i} style={{ fontSize: 12, fontWeight: 700, padding: '6px 8px', borderRadius: 8, background: '#FEF3C7', color: '#92400E' }}>Pendiente: {label(l.slot)}</span>
+            ))}
+          </div>
+        </>
       ) : (
-        <div style={{ margin: '0 16px', background: '#1F3A33', borderRadius: 16, padding: 16, textAlign: 'center' }}>
-          <div style={{ fontSize: 20, fontWeight: 900 }}>No queda nada por grabar</div>
-          <div style={{ fontSize: 14, color: '#B8C4CF', marginTop: 4 }}>
-            {pending ? `${pending} videos quedaron pendientes (saltados).` : 'Todos los videos de la sesión están grabados.'}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: 14, padding: '20px 20px calc(20px + env(safe-area-inset-bottom))', textAlign: 'center' }}>
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke={pending ? '#FBBF24' : '#3DD6A3'} strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="M7 12.5l3.5 3.5L17 9" /></svg>
+          <div style={{ fontSize: 26, fontWeight: 900 }}>{pending ? 'Grabación casi completa' : '¡Sesión grabada!'}</div>
+          <div style={{ fontSize: 16, color: '#D5DDE4', lineHeight: 1.45 }}>
+            {done} de {total} videos grabados{absentNames.length ? ` · Ausentes: ${absentNames.join(', ')}` : ''}.<br />
+            {pending ? `${pending} quedaron pendientes porque los saltaste.` : 'Los videos quedaron guardados en este celular.'}
           </div>
           {pending > 0 && clips && (
-            <button className="btn" style={{ marginTop: 10, background: '#fff', color: '#0F1720', height: 48 }}
-              onClick={() => setCur(nextSlot(order, s, clips, null, true))}>Grabar los pendientes</button>
+            <button className="btn" style={{ background: '#fff', color: '#0F1720' }} onClick={() => { setManual(false); setCur(nextSlot(order, s, clips, null, true)) }}>
+              Grabar los {pending} pendientes
+            </button>
           )}
+          <button className="btn" style={{ background: '#2A3642', color: '#fff' }} onClick={() => setPicker(order[0])}>Volver a grabar uno</button>
+          <button className="btn" style={{ background: '#0A6FA8', color: '#fff' }} onClick={() => nav(`/sesion/${s.id}`)}>Terminar</button>
+          <div style={{ fontSize: 13, color: '#8996A3' }}>El siguiente paso será puntuar cada video (Etapa 3).</div>
         </div>
       )}
 
-      <div style={{ flex: 1, position: 'relative', margin: '12px 16px', borderRadius: 16, overflow: 'hidden', background: '#1C2731', border: `3px solid ${recording ? '#FF4D5E' : '#1C2731'}` }}>
-        <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        <div style={{ position: 'absolute', top: 10, left: 10, background: 'rgba(0,0,0,.55)', borderRadius: 8, padding: '6px 10px', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-          {recording ? <><span style={{ width: 10, height: 10, borderRadius: 5, background: '#FF4D5E' }} /> Grabando 00:{String(elapsed).padStart(2, '0')}</> : 'Listo para grabar'}
-        </div>
-        {camError && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, textAlign: 'center', fontSize: 15 }}>{camError}</div>}
-      </div>
-
-      {cur && <div style={{ textAlign: 'center', fontSize: 14, color: '#B8C4CF' }}>Después: <strong style={{ color: '#fff' }}>{after ? label(after) : 'nada más'}</strong></div>}
-
-      <div style={{ padding: '12px 16px', display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', alignItems: 'center' }}>
-        <button onClick={skip} disabled={!cur || recording} style={{ justifySelf: 'start', background: '#2A3642', color: '#fff', border: 'none', borderRadius: 12, padding: '0 16px', height: 48, fontSize: 15, fontWeight: 700 }}>Saltar</button>
-        <button aria-label={recording ? 'Detener y guardar' : 'Grabar'} disabled={!cur || !!camError} onClick={recording ? stop : start}
-          style={{ justifySelf: 'center', width: 84, height: 84, borderRadius: 42, border: '5px solid #fff', background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, opacity: !cur || camError ? 0.4 : 1 }}>
-          <span style={recording ? { width: 30, height: 30, borderRadius: 6, background: '#FF4D5E' } : { width: 62, height: 62, borderRadius: 31, background: '#FF4D5E' }} />
-        </button>
-        <button onClick={() => cur && setPicker(cur)} disabled={recording || !s.kidIds.length} style={{ justifySelf: 'end', background: '#2A3642', color: '#fff', border: 'none', borderRadius: 12, padding: '0 16px', height: 48, fontSize: 15, fontWeight: 700 }}>Elegir</button>
-      </div>
-
-      <div style={{ padding: '0 16px calc(12px + env(safe-area-inset-bottom))', display: 'flex', gap: 6, flexWrap: 'wrap', minHeight: 30 }}>
-        {lastOk && !recording && (
-          <button onClick={() => openReview(lastOk.slot)} style={{ fontSize: 13, fontWeight: 700, padding: '6px 10px', borderRadius: 8, border: 'none', background: '#1F3A33', color: '#8FE8C8' }}>
-            ▶ Ver último: {label(lastOk.slot)}
-          </button>
-        )}
-        {log.slice(-2).filter((l) => !l.ok).map((l, i) => (
-          <span key={i} style={{ fontSize: 12, fontWeight: 700, padding: '6px 8px', borderRadius: 8, background: '#FEF3C7', color: '#92400E' }}>Pendiente: {label(l.slot)}</span>
-        ))}
-      </div>
-
       {picker && clips && (
         <Picker session={s} kids={s.kidIds.map((k) => kidOf(k)).filter(Boolean) as Kid[]} clips={clips} initial={picker}
-          onClose={() => setPicker(null)} onPick={(slot) => { setCur(slot); setPicker(null) }} />
+          onClose={() => setPicker(null)} onPick={(slot) => { pick(slot); setPicker(null) }} />
       )}
 
       {review && (
@@ -235,7 +278,7 @@ export function Recorder() {
             <h2>{label(review.slot)}</h2>
             <video src={review.url} controls autoPlay playsInline style={{ width: '100%', borderRadius: 12, background: '#000', maxHeight: '55vh' }} />
             <button className="btn primary" onClick={closeReview}>Está bien</button>
-            <button className="btn ghost" onClick={() => { setCur(review.slot); closeReview() }}>Volver a grabarlo</button>
+            <button className="btn ghost" onClick={() => { pick(review.slot); closeReview() }}>Volver a grabarlo</button>
           </div>
         </div>
       )}

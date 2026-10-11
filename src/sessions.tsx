@@ -92,6 +92,9 @@ export function SessionView() {
           </span>
         </div>
 
+        {sessionKids.length > 0 && clips && okCount(clips) >= sessionKids.length * CLIPS_PER_KID && (
+          <div className="banner ok"><strong>Grabación completa.</strong> Todos los videos están en este celular. El siguiente paso será puntuarlos.</div>
+        )}
         <div className="section-title">Niños en esta sesión</div>
         {sessionKids.map((k) => {
           const done = okCount(clips, k.id)
