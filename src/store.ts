@@ -308,7 +308,8 @@ export function setReportText(sessionId: string, kidId: string, patch: { conclus
 
 const EVAL_KEY = 'tgmd-evaluador'
 export function evaluatorName(): string {
-  try { return localStorage.getItem(EVAL_KEY) || state.user?.name || '' } catch { return state.user?.name || '' }
+  const fallback = state.user && state.user.uid !== 'local' ? state.user.name : ''
+  try { return localStorage.getItem(EVAL_KEY) || fallback } catch { return fallback }
 }
 export function setEvaluatorName(n: string) { try { localStorage.setItem(EVAL_KEY, n) } catch { /* sin espacio */ } }
 

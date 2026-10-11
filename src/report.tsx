@@ -42,7 +42,7 @@ export function draftTexts(kid: Kid, t: TestData): { conclusions: string; sugges
     parts.push(`El área de mejora está en ${list(details)}.`)
   } else parts.push('Muestra un buen dominio en todas las habilidades evaluadas.')
   const sugg = weak.length
-    ? `Enfocar los ejercicios en ${list(weak.map((x) => x.skill.name.toLowerCase()))}, trabajando especialmente ${list(weak.flatMap((x) => failed(x.skill).slice(0, 1)))}. Mantener actividades variadas que refuercen las habilidades ya logradas.`
+    ? `Enfocar los ejercicios en ${list(weak.map((x) => x.skill.name.toLowerCase()))}, trabajando especialmente ${list([...new Set(weak.flatMap((x) => failed(x.skill).slice(0, 1)))])}. Mantener actividades variadas que refuercen las habilidades ya logradas.`
     : 'Mantener actividades variadas que sostengan su buen nivel e incorporar desafíos de mayor dificultad en coordinación, ritmo y precisión.'
   return { conclusions: parts.join(' '), suggestions: sugg }
 }
@@ -102,8 +102,9 @@ function AgeChart({ tests, sub, light, strong }: { tests: TestData[]; sub: 'loc'
   })
   const valid = items.filter(Boolean) as NonNullable<(typeof items)[number]>[]
   if (!valid.length) return <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#5A6B7B', fontSize: 13 }}>Sin datos de edad equivalente</div>
-  let lo = Math.min(0, Math.floor(Math.min(...valid.map((v) => v.diff)) / 12))
-  let hi = Math.max(0, Math.ceil(Math.max(...valid.map((v) => v.diff)) / 12))
+  // Margen extra para que la etiqueta de la barra no choque con el borde del gráfico.
+  let lo = Math.min(0, Math.floor((Math.min(...valid.map((v) => v.diff)) - 5) / 12))
+  let hi = Math.max(0, Math.ceil((Math.max(...valid.map((v) => v.diff)) + 5) / 12))
   if (hi - lo < 2) { if (hi === 0) lo = Math.min(lo, -2); else hi = Math.max(hi, 2) }
   const H = 170, ppy = H / (hi - lo), zeroY = hi * ppy
   const ticks = Array.from({ length: hi - lo + 1 }, (_, i) => hi - i)
@@ -172,7 +173,7 @@ export function ReportPage({ kid, tests, sessionId, editable }: { kid: Kid; test
       <div style={{ background: '#0A6FA8', color: '#fff', borderRadius: 14, padding: '16px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 30, fontWeight: 900 }}>{kid.name}</span>
-          <span style={{ fontSize: 17 }}>Edad: {a ? `${a.years} años, ${a.months} meses, ${a.days} días` : '—'}</span>
+          <span style={{ fontSize: 17 }}>Edad: {a ? `${a.years} ${a.years === 1 ? 'año' : 'años'}, ${a.months} ${a.months === 1 ? 'mes' : 'meses'}, ${a.days} ${a.days === 1 ? 'día' : 'días'}` : '—'}</span>
         </div>
         {r.overMax && <span style={{ fontSize: 12, background: 'rgba(255,255,255,.18)', padding: '6px 10px', borderRadius: 8 }}>Calculado con normas de 10 años 11 meses</span>}
       </div>
