@@ -28,11 +28,16 @@ function sideMarks(ws: ExcelJS.Worksheet, row: number, cols: [string, string, st
   cols.forEach((c, i) => { ws.getCell(`${c}${row}`).value = `${on[i] ? '☒' : '☐'} ${labels[i]}` })
 }
 
+let templateCache: ArrayBuffer | null = null
+async function template(): Promise<ArrayBuffer> {
+  if (!templateCache) templateCache = await (await fetch(`${import.meta.env.BASE_URL}plantilla-tgmd2.xlsx`)).arrayBuffer()
+  return templateCache.slice(0)
+}
+
 export async function buildWorkbook(kid: Kid, evaluator: string, tests: TestData[]): Promise<ExcelJS.Workbook> {
   const ExcelJSMod = (await import('exceljs')).default
-  const res = await fetch(`${import.meta.env.BASE_URL}plantilla-tgmd2.xlsx`)
   const wb = new ExcelJSMod.Workbook()
-  await wb.xlsx.load(await res.arrayBuffer())
+  await wb.xlsx.load(await template())
   const ws = wb.worksheets[0]
   ws.name = kid.name.slice(0, 28).replace(/[\\/?*[\]:]/g, ' ') || 'TGMD'
 
@@ -144,4 +149,67 @@ export function download(blob: Blob, name: string) {
   a.click()
   a.remove()
   setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+}
+
+// ---------- Un solo Excel por carpeta: una hoja por niño + hoja "Resumen" ----------
+export interface GroupEntry { kid: Kid; tests: TestData[] }
+
+const sheetName = (name: string, used: Set<string>) => {
+  const base = (name.replace(/[\\/?*[\]:]/g, ' ').trim() || 'Niño').slice(0, 28)
+  let n = base, i = 2
+  while (used.has(n.toLowerCase())) n = `${base.slice(0, 25)} ${i++}`
+  used.add(n.toLowerCase())
+  return n
+}
+
+export async function buildGroupWorkbook(group: string, evaluator: string, entries: GroupEntry[]): Promise<ExcelJS.Workbook> {
+  const ExcelJSMod = (await import('exceljs')).default
+  const out = new ExcelJSMod.Workbook()
+  out.creator = evaluator
+  const used = new Set<string>(['resumen'])
+
+  // Hoja Resumen
+  const sum = out.addWorksheet('Resumen', { views: [{ state: 'frozen', ySplit: 3 }] })
+  sum.getCell('A1').value = `TGMD-2 · ${group}`
+  sum.getCell('A1').font = { bold: true, size: 14, color: { argb: 'FF0A6FA8' } }
+  sum.getCell('A2').value = `Actualizado: ${new Date().toLocaleDateString('es')} · Evaluador: ${evaluator}`
+  const head = ['Niño', 'Sexo', 'Fecha nac.', 'Fecha 1° test', 'Loc. bruto', 'Loc. estándar', 'OC bruto', 'OC estándar', 'GMQ', 'Categoría',
+    'Fecha 2° test', 'Loc. bruto', 'Loc. estándar', 'OC bruto', 'OC estándar', 'GMQ', 'Categoría']
+  sum.addRow([])
+  const hr = sum.getRow(3)
+  hr.values = head
+  hr.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+  hr.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0A6FA8' } }; c.alignment = { wrapText: true, vertical: 'middle' } })
+  hr.height = 30
+  const fmt = (iso: string) => { const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}` }
+  const block = (t?: TestData) => t
+    ? [fmt(t.date), t.result.loc.raw, t.result.loc.ss ?? '', t.result.obj.raw, t.result.obj.ss ?? '', t.result.gmq ?? '', t.result.rating?.es ?? '']
+    : ['', '', '', '', '', '', '']
+  for (const e of entries) {
+    const [t1, t2] = e.tests.length > 1 ? e.tests : [e.tests[0], undefined]
+    sum.addRow([e.kid.name, e.kid.sex === 'M' ? 'M' : e.kid.sex === 'F' ? 'F' : '', e.kid.birthDate ? fmt(e.kid.birthDate) : '', ...block(t1), ...block(t2)])
+  }
+  sum.columns.forEach((c, i) => { c.width = i === 0 ? 24 : i === 9 || i === 16 ? 18 : 12 })
+  sum.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 } as ExcelJS.PageSetup
+
+  // Una hoja por niño, copiada de la plantilla
+  for (const e of entries) {
+    const wbK = await buildWorkbook(e.kid, evaluator, e.tests)
+    const src = wbK.worksheets[0]
+    const dst = out.addWorksheet(sheetName(e.kid.name, used))
+    const name = dst.name
+    const model = src.model as ExcelJS.WorksheetModel & { merges?: string[]; mergeCells?: string[] }
+    dst.model = { ...model, name, mergeCells: model.merges, media: [] } as unknown as ExcelJS.WorksheetModel
+    dst.name = name
+    for (const img of src.getImages()) {
+      const media = wbK.getImage(Number(img.imageId))
+      if (!media) continue
+      const id = out.addImage({ buffer: media.buffer as ExcelJS.Buffer, extension: (media.extension || 'png') as 'png' })
+      const range = img.range as unknown as { tl: ExcelJS.Anchor; br?: ExcelJS.Anchor; ext?: { width: number; height: number } }
+      if (range.br) dst.addImage(id, { tl: range.tl, br: range.br } as unknown as ExcelJS.ImageRange)
+      else dst.addImage(id, { tl: range.tl, ext: range.ext ?? { width: 120, height: 120 } } as unknown as ExcelJS.ImageRange)
+    }
+  }
+  out.calcProperties = { ...(out.calcProperties || {}), fullCalcOnLoad: true }
+  return out
 }

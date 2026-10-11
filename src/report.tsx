@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useStore, scoreId, setReportText, evaluatorName, type Kid, type Score, type Session } from './store'
+import { useStore, scoreId, setReportText, type Kid, type Score, type Session } from './store'
 import { computeResult, aeToMonths, dateFromIso, type Norms, type Result } from './calc'
 import { SKILLS, type Skill } from './skills'
-import { buildWorkbook, workbookBlob, download, safeName, type TestData } from './excel'
+import type { TestData } from './excel'
+import { exportFoldersOf, folderLabel } from './exports'
 
 const MONTHS_LONG = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
 const longDate = (iso: string) => { const d = dateFromIso(iso); return `${d.getDate()} / ${MONTHS_LONG[d.getMonth()]} / ${d.getFullYear()}` }
@@ -65,7 +66,7 @@ const LABEL_POS: { x: number; y: number; anchor: 'middle' | 'start' | 'end'; inl
 function Radar({ skills, cur, prev, fill, stroke }: { skills: Skill[]; cur: Result; prev?: Result; fill: string; stroke: string }) {
   const pctOf = (r: Result, sk: Skill) => (r.skills.find((x) => x.skill.id === sk.id)?.pct ?? 0) / 100
   return (
-    <svg width="352" height="222" viewBox="-80 0 460 292" role="img" aria-label="Porcentaje logrado por habilidad">
+    <svg width="352" height="222" viewBox="-80 0 460 292" style={{ margin: '14px 0 6px' }} role="img" aria-label="Porcentaje logrado por habilidad">
       <polygon points={ring(1)} fill="none" stroke="#D1D5DB" />
       <polygon points={ring(0.5)} fill="none" stroke="#D1D5DB" strokeDasharray="3 3" />
       {skills.map((_, i) => <line key={i} x1={C} y1={C} x2={pt(i, 1).split(',')[0]} y2={pt(i, 1).split(',')[1]} stroke="#E5E7EB" />)}
@@ -187,13 +188,10 @@ export function ReportPage({ kid, tests, sessionId, editable }: { kid: Kid; test
         ))}
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
           <span style={{ fontSize: 16, fontWeight: 900, color: '#0A6FA8' }}>Edad motora vs. edad cronológica</span>
           <span style={{ fontSize: 12, color: '#5A6B7B' }}>Cada línea = 1 año{prev ? ' · claro = 1° test · fuerte = 2° test' : ''}</span>
-        </div>
-        <div style={{ fontSize: 12, color: '#33414E' }}>
-          {r.overMax ? 'Por ser mayor de 10 años, se compara con 10-11 (máximo del test).' : `Cada test se compara con la edad real del día en que se tomó${prev && prev.result.normMonths !== null && r.normMonths !== null ? `: 1° test ${Math.floor(prev.result.normMonths / 12)}-${prev.result.normMonths % 12} · 2° test ${Math.floor(r.normMonths / 12)}-${r.normMonths % 12}` : '.'}`}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 32 }}>
           <AgeChart tests={tests} sub="loc" light="#FBDDB2" strong="#F2A541" />
@@ -201,7 +199,7 @@ export function ReportPage({ kid, tests, sessionId, editable }: { kid: Kid; test
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', border: '2px solid #0A6FA8', borderRadius: 14, overflow: 'hidden' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', border: '2px solid #0A6FA8', borderRadius: 14, overflow: 'hidden', marginTop: 22 }}>
         {([['Conclusiones', conc, setConc, 'conclusions'], ['Sugerencias', sugg, setSugg, 'suggestions']] as const).map(([title, val, setVal, key], i) => (
           <div key={key} style={{ display: 'flex', flexDirection: 'column', borderRight: i === 0 ? '2px solid #0A6FA8' : 'none' }}>
             <div style={{ background: '#0A6FA8', color: '#fff', fontSize: 16, fontWeight: 900, padding: '8px 16px', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}>{title}</div>
@@ -244,19 +242,8 @@ export function ReportScreen() {
   const excel = async () => {
     setBusy(true)
     try {
-      if (list.length === 1) {
-        const k = list[0]
-        const wb = await buildWorkbook(k, evaluatorName(), kidTests(k, s, sessions, scores, norms))
-        download(await workbookBlob(wb), `TGMD2_${safeName(k.name)}_${s.date}.xlsx`)
-      } else {
-        const JSZip = (await import('jszip')).default
-        const zip = new JSZip()
-        for (const k of list) {
-          const wb = await buildWorkbook(k, evaluatorName(), kidTests(k, s, sessions, scores, norms))
-          zip.file(`TGMD2_${safeName(k.name)}_${s.date}.xlsx`, await (await workbookBlob(wb)).arrayBuffer())
-        }
-        download(await zip.generateAsync({ type: 'blob' }), `TGMD2_grupo_${s.date}.zip`)
-      }
+      const ok = await exportFoldersOf(list)
+      if (!ok) alert('Todavía no hay niños puntuados para exportar.')
     } finally { setBusy(false) }
   }
   const btn = { height: 44, padding: '0 14px', borderRadius: 10, border: 'none', fontSize: 14, fontWeight: 900 } as const
@@ -267,7 +254,7 @@ export function ReportScreen() {
         <button className="icon-btn light" aria-label="Volver" onClick={() => nav(kidId ? `/sesion/${s.id}/resultados/${kidId}` : `/sesion/${s.id}/resultados`)}>✕</button>
         <span style={{ flex: 1, fontWeight: 900, fontSize: 16, minWidth: 120 }}>{kidId ? 'Informe gráfico' : `Informes del grupo (${list.length})`}</span>
         <button style={{ ...btn, background: '#F4F7FA', color: '#1B2733' }} onClick={suggest}>Sugerir texto</button>
-        <button style={{ ...btn, background: '#0B7A61', color: '#fff' }} disabled={busy} onClick={excel}>{busy ? 'Generando…' : list.length > 1 ? 'Excel (todos)' : 'Excel'}</button>
+        <button style={{ ...btn, background: '#0B7A61', color: '#fff' }} disabled={busy} onClick={excel}>{busy ? 'Generando…' : `Excel de ${[...new Set(list.map((k) => folderLabel(k.folderId)))].join(' + ')}`}</button>
         <button style={{ ...btn, background: '#0A6FA8', color: '#fff' }} onClick={() => window.print()}>PDF / Imprimir</button>
       </div>
       <div className="no-print" style={{ padding: '8px 12px', fontSize: 13, color: '#33414E' }}>

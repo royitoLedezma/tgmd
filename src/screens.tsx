@@ -7,6 +7,7 @@ import {
 import { ageText, isOverMax } from './age'
 import { Sheet, Icon, Top } from './ui'
 import { useCanInstall, installApp, isInstalled } from './install'
+import { exportFolder } from './exports'
 
 const NONE = 'sin'
 const plural = (n: number) => `${n} ${n === 1 ? 'niño' : 'niños'}`
@@ -81,6 +82,7 @@ export function FolderView() {
   const [kidSheet, setKidSheet] = useState<KidSheet>(null)
   const [folderSheet, setFolderSheet] = useState<null | 'menu' | 'rename' | 'delete'>(null)
   const [newName, setNewName] = useState('')
+  const [exporting, setExporting] = useState(false)
 
   if (!isNone && !folder) {
     return (<><Top title="Carpeta" back="/" /><main className="content"><div className="empty">Esta carpeta ya no existe.</div></main></>)
@@ -93,6 +95,12 @@ export function FolderView() {
       <Top title={title} sub={plural(list.length)} back="/"
         right={!isNone && <button className="icon-btn" aria-label="Opciones de la carpeta" onClick={() => setFolderSheet('menu')}>{Icon.more}</button>} />
       <main className="content">
+        {list.length > 0 && (
+          <button className="btn ghost" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: 'var(--green)', borderColor: 'var(--green)' }} disabled={exporting}
+            onClick={async () => { setExporting(true); try { if (!(await exportFolder(isNone ? null : id))) alert('Todavía no hay niños evaluados en esta carpeta.') } finally { setExporting(false) } }}>
+            {exporting ? 'Generando…' : 'Descargar Excel de la carpeta'}
+          </button>
+        )}
         {list.length === 0 && <div className="empty">Esta carpeta está vacía</div>}
         {list.map((k) => {
           const warn = missing(k)
