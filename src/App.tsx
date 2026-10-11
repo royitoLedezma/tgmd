@@ -3,12 +3,13 @@ import { useStore, clearError } from './store'
 import { FolderList, FolderView, KidForm, Settings, Login } from './screens'
 import { SessionList, SessionView } from './sessions'
 import { Recorder } from './recorder'
+import { ScoreKids, ScoreSkill } from './scoring'
 import { BottomNav } from './ui'
 
 function Shell() {
   const { error } = useStore()
   const loc = useLocation()
-  const fullScreen = loc.pathname.endsWith('/grabar')
+  const fullScreen = loc.pathname.endsWith('/grabar') || /\/puntuar\/[^/]+\/[^/]+$/.test(loc.pathname)
   return (
     <div className="app">
       {error && (
@@ -25,6 +26,8 @@ function Shell() {
         <Route path="/sesiones" element={<SessionList />} />
         <Route path="/sesion/:id" element={<SessionView />} />
         <Route path="/sesion/:id/grabar" element={<Recorder />} />
+        <Route path="/sesion/:id/puntuar" element={<ScoreKids />} />
+        <Route path="/sesion/:id/puntuar/:kidId/:skillId" element={<ScoreSkill />} />
         <Route path="/ajustes" element={<Settings />} />
       </Routes>
       {!fullScreen && <BottomNav />}

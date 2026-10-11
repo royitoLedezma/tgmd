@@ -262,8 +262,8 @@ export function Recorder() {
             </button>
           )}
           <button className="btn" style={{ background: '#2A3642', color: '#fff' }} onClick={() => setPicker(order[0])}>Volver a grabar uno</button>
-          <button className="btn" style={{ background: '#0A6FA8', color: '#fff' }} onClick={() => nav(`/sesion/${s.id}`)}>Terminar</button>
-          <div style={{ fontSize: 13, color: '#8996A3' }}>El siguiente paso será puntuar cada video (Etapa 3).</div>
+          <button className="btn" style={{ background: '#0A6FA8', color: '#fff' }} onClick={() => nav(`/sesion/${s.id}/puntuar`)}>Ir a puntuar los videos</button>
+          <button className="btn" style={{ background: 'transparent', color: '#B8C4CF', border: '1.5px solid #2A3642' }} onClick={() => nav(`/sesion/${s.id}`)}>Terminar por ahora</button>
         </div>
       )}
 

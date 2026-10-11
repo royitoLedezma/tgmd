@@ -44,7 +44,18 @@ export interface Session {
   createdAt: number
 }
 
-interface Data { folders: Folder[]; kids: Kid[]; sessions: Session[] }
+/** Marca de un criterio: 1 = logrado, 0 = no logrado, null = sin marcar. */
+export type Mark = 0 | 1 | null
+/** Puntuación de un niño en una sesión. marks["prueba:criterio"] = [intento1, intento2] */
+export interface Score {
+  id: string // sesion_niño
+  sessionId: string
+  kidId: string
+  marks: Record<string, [Mark, Mark]>
+  ownerId: string
+  createdAt: number
+}
+interface Data { folders: Folder[]; kids: Kid[]; sessions: Session[]; scores: Score[] }
 interface State extends Data {
   mode: 'local' | 'nube'
   ready: boolean
@@ -64,6 +75,7 @@ let state: State = {
   folders: [],
   kids: [],
   sessions: [],
+  scores: [],
   error: null,
 }
 const listeners = new Set<() => void>()
@@ -88,6 +100,7 @@ function sorted(data: Partial<Data>): Partial<Data> {
   if (data.folders) out.folders = [...data.folders].sort(byName)
   if (data.kids) out.kids = [...data.kids].sort(byName)
   if (data.sessions) out.sessions = [...data.sessions].sort(byNewest)
+  if (data.scores) out.scores = data.scores
   return out
 }
 
@@ -97,12 +110,12 @@ function loadLocal() {
     const raw = localStorage.getItem(LOCAL_KEY)
     if (raw) {
       const d = JSON.parse(raw)
-      set(sorted({ folders: d.folders || [], kids: d.kids || [], sessions: d.sessions || [] }))
+      set(sorted({ folders: d.folders || [], kids: d.kids || [], sessions: d.sessions || [], scores: d.scores || [] }))
     }
   } catch { /* datos dañados: se empieza vacío */ }
 }
 function saveLocal(patch: Partial<Data>) {
-  const next: Data = { folders: state.folders, kids: state.kids, sessions: state.sessions, ...patch }
+  const next: Data = { folders: state.folders, kids: state.kids, sessions: state.sessions, scores: state.scores, ...patch }
   try { localStorage.setItem(LOCAL_KEY, JSON.stringify(next)) } catch { /* sin espacio */ }
   set(sorted(next))
 }
@@ -126,14 +139,14 @@ if (cloudEnabled) {
   const auth = getAuth(app)
   onAuthStateChanged(auth, (u: User | null) => {
     unsubs.forEach((f) => f()); unsubs = []
-    if (!u) { set({ user: null, ready: true, folders: [], kids: [], sessions: [] }); return }
+    if (!u) { set({ user: null, ready: true, folders: [], kids: [], sessions: [], scores: [] }); return }
     set({ user: { uid: u.uid, name: u.displayName || '', email: u.email || '' }, ready: true })
     const listen = (c: Col) => unsubs.push(onSnapshot(
       query(collection(db!, c), where('ownerId', '==', u.uid)),
       (s) => set(sorted({ [c]: s.docs.map((d) => d.data()) } as Partial<Data>)),
       readError,
     ))
-    listen('folders'); listen('kids'); listen('sessions')
+    listen('folders'); listen('kids'); listen('sessions'); listen('scores')
   })
 } else {
   loadLocal()
@@ -242,13 +255,32 @@ export function createSession(mode: SessionMode = 'grupal'): string {
 export function updateSession(id: string, patch: Partial<Omit<Session, 'id' | 'ownerId' | 'createdAt'>>) {
   patchItem('sessions', id, patch)
 }
-export function deleteSession(id: string) { remove('sessions', id) }
+export function deleteSession(id: string) {
+  state.scores.filter((x) => x.sessionId === id).forEach((x) => remove('scores', x.id))
+  remove('sessions', id)
+}
+
+// ---------- Puntuaciones ----------
+export const scoreId = (sessionId: string, kidId: string) => `${sessionId}_${kidId}`
+export function setMarks(sessionId: string, kidId: string, key: string, value: [Mark, Mark]) {
+  const id = scoreId(sessionId, kidId)
+  const existing = state.scores.find((x) => x.id === id)
+  if (db) {
+    const base = existing ? {} : { id, sessionId, kidId, ownerId: uid(), createdAt: Date.now() }
+    bg(setDoc(doc(db, 'scores', id), { ...base, ownerId: uid(), marks: { [key]: value } }, { merge: true }))
+  } else {
+    const sc: Score = existing
+      ? { ...existing, marks: { ...existing.marks, [key]: value } }
+      : { id, sessionId, kidId, ownerId: uid(), createdAt: Date.now(), marks: { [key]: value } }
+    saveLocal({ scores: [...state.scores.filter((x) => x.id !== id), sc] })
+  }
+}
 
 // ---------- Respaldo ----------
 export function backupJson(): string {
   return JSON.stringify({
     app: 'tgmd', version: 2, fecha: new Date().toISOString(),
-    folders: state.folders, kids: state.kids, sessions: state.sessions,
+    folders: state.folders, kids: state.kids, sessions: state.sessions, scores: state.scores,
   }, null, 2)
 }
 
@@ -257,7 +289,7 @@ export async function restoreBackup(text: string): Promise<number> {
   const d = JSON.parse(text)
   if (d.app !== 'tgmd') throw new Error('El archivo no es un respaldo de esta app')
   const mine = <T>(xs: T[] | undefined) => (xs || []).map((x) => ({ ...x, ownerId: uid() }))
-  const incoming: Data = { folders: mine(d.folders), kids: mine(d.kids), sessions: mine(d.sessions) }
+  const incoming: Data = { folders: mine(d.folders), kids: mine(d.kids), sessions: mine(d.sessions), scores: mine(d.scores) }
   if (db) {
     const b = writeBatch(db)
     ;(Object.keys(incoming) as Col[]).forEach((c) => (incoming[c] as Item[]).forEach((x) => b.set(doc(db!, c, x.id), x)))
@@ -268,7 +300,8 @@ export async function restoreBackup(text: string): Promise<number> {
       folders: merge(state.folders, incoming.folders),
       kids: merge(state.kids, incoming.kids),
       sessions: merge(state.sessions, incoming.sessions),
+      scores: merge(state.scores, incoming.scores),
     })
   }
-  return incoming.folders.length + incoming.kids.length + incoming.sessions.length
+  return incoming.folders.length + incoming.kids.length + incoming.sessions.length + incoming.scores.length
 }

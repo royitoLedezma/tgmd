@@ -310,7 +310,7 @@ export function Settings() {
         </label>
         {msg && <div className={`banner ${msg.kind}`}>{msg.text}</div>}
         <div className="section-title">Versión</div>
-        <div className="meta" style={{ color: 'var(--muted)', fontSize: 14 }}>Etapa 2 · Sesiones y grabación</div>
+        <div className="meta" style={{ color: 'var(--muted)', fontSize: 14 }}>Etapa 3 · Puntuación con video</div>
       </main>
     </>
   )

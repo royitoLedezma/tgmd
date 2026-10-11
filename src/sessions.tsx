@@ -93,7 +93,7 @@ export function SessionView() {
         </div>
 
         {sessionKids.length > 0 && clips && okCount(clips) >= sessionKids.length * CLIPS_PER_KID && (
-          <div className="banner ok"><strong>Grabación completa.</strong> Todos los videos están en este celular. El siguiente paso será puntuarlos.</div>
+          <div className="banner ok"><strong>Grabación completa.</strong> Todos los videos están en este celular. El siguiente paso es puntuarlos.</div>
         )}
         <div className="section-title">Niños en esta sesión</div>
         {sessionKids.map((k) => {
@@ -125,7 +125,10 @@ export function SessionView() {
         )}
       </main>
       <div className="footer">
-        <button className="btn" style={{ background: '#D7263D', color: '#fff' }} disabled={!sessionKids.length} onClick={() => nav(`/sesion/${s.id}/grabar`)}>● Grabar</button>
+        <div className="seg c2" style={{ gap: 8 }}>
+          <button className="btn" style={{ background: '#D7263D', color: '#fff', border: 'none' }} disabled={!sessionKids.length} onClick={() => nav(`/sesion/${s.id}/grabar`)}>● Grabar</button>
+          <button className="btn primary" style={{ border: 'none' }} disabled={!sessionKids.length} onClick={() => nav(`/sesion/${s.id}/puntuar`)}>✓ Puntuar</button>
+        </div>
       </div>
 
       {sheet === 'folders' && (
