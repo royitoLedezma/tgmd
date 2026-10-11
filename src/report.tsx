@@ -92,31 +92,43 @@ function ageDiffText(months: number) {
   return `${parts.join(' ')} ${months > 0 ? 'por encima' : 'por debajo'} de su edad`
 }
 
+/** "5-6" → ["5 años", "6 meses"]; "<3-0" → ["menos de", "3 años"]; ">10-9" → ["más de", "10 años", "9 meses"] */
+function aeLines(ae: string): string[] {
+  const pre = ae.startsWith('<') ? ['menos de'] : ae.startsWith('>') ? ['más de'] : []
+  const [y, m] = ae.replace(/[<>]/g, '').split('-').map(Number)
+  const out = [...pre, `${y} ${y === 1 ? 'año' : 'años'}`]
+  if (m) out.push(`${m} ${m === 1 ? 'mes' : 'meses'}`)
+  return out
+}
+
 function AgeChart({ tests, sub, light, strong }: { tests: TestData[]; sub: 'loc' | 'obj'; light: string; strong: string }) {
   const items = tests.map((t, i) => {
     const ae = t.result[sub].ae
     const chrono = t.result.normMonths
     if (!ae || chrono === null) return null
     const aeM = ae.startsWith('<') ? aeToMonths(ae) - 1 : ae.startsWith('>') ? aeToMonths(ae) + 1 : aeToMonths(ae)
-    return { label: ae.replace('<', '< ').replace('>', '> '), diff: aeM - chrono, color: i === tests.length - 1 ? strong : light, ink: i === tests.length - 1 && sub === 'obj' ? '#fff' : '#1B2733' }
+    return { lines: aeLines(ae), diff: aeM - chrono, color: i === tests.length - 1 ? strong : light, ink: i === tests.length - 1 && sub === 'obj' ? '#fff' : '#1B2733' }
   })
   const valid = items.filter(Boolean) as NonNullable<(typeof items)[number]>[]
   if (!valid.length) return <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#5A6B7B', fontSize: 13 }}>Sin datos de edad equivalente</div>
-  // Margen extra para que la etiqueta de la barra no choque con el borde del gráfico.
-  let lo = Math.min(0, Math.floor((Math.min(...valid.map((v) => v.diff)) - 5) / 12))
-  let hi = Math.max(0, Math.ceil((Math.max(...valid.map((v) => v.diff)) + 5) / 12))
+  let lo = Math.min(0, Math.floor(Math.min(...valid.map((v) => v.diff)) / 12))
+  let hi = Math.max(0, Math.ceil(Math.max(...valid.map((v) => v.diff)) / 12))
   if (hi - lo < 2) { if (hi === 0) lo = Math.min(lo, -2); else hi = Math.max(hi, 2) }
-  const H = 170, ppy = H / (hi - lo), zeroY = hi * ppy
+  // Espacio reservado (en px) arriba y abajo para las etiquetas "5 años / 6 meses".
+  const maxLines = (pos: boolean) => Math.max(0, ...valid.filter((v) => (v.diff >= 0) === pos).map((v) => v.lines.length))
+  const padTop = maxLines(true) ? maxLines(true) * 16 + 8 : 8
+  const padBottom = maxLines(false) ? maxLines(false) * 16 + 8 : 8
+  const total = 200, H = total - padTop - padBottom, ppy = H / (hi - lo), zeroY = padTop + hi * ppy
   const ticks = Array.from({ length: hi - lo + 1 }, (_, i) => hi - i)
   const last = valid[valid.length - 1]
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={{ display: 'flex', gap: 8 }}>
-        <div style={{ position: 'relative', width: 24, height: H + 6, fontSize: 11, color: '#6B7280', textAlign: 'right' }}>
-          {ticks.map((t) => <span key={t} style={{ position: 'absolute', right: 0, top: (hi - t) * ppy - 6 }}>{t > 0 ? `+${t}` : t}</span>)}
+        <div style={{ position: 'relative', width: 24, height: total, fontSize: 11, color: '#6B7280', textAlign: 'right' }}>
+          {ticks.map((t) => <span key={t} style={{ position: 'absolute', right: 0, top: padTop + (hi - t) * ppy - 6 }}>{t > 0 ? `+${t}` : t}</span>)}
         </div>
-        <div style={{ flex: 1, position: 'relative', height: H + 6 }}>
-          {ticks.map((t) => <div key={t} style={{ position: 'absolute', left: 0, right: 0, top: (hi - t) * ppy, borderTop: '1px dashed #E5E7EB' }} />)}
+        <div style={{ flex: 1, position: 'relative', height: total }}>
+          {ticks.map((t) => <div key={t} style={{ position: 'absolute', left: 0, right: 0, top: padTop + (hi - t) * ppy, borderTop: '1px dashed #E5E7EB' }} />)}
           {items.map((it, i) => {
             if (!it) return null
             const h = Math.max(2, (Math.abs(it.diff) / 12) * ppy)
@@ -125,7 +137,9 @@ function AgeChart({ tests, sub, light, strong }: { tests: TestData[]; sub: 'loc'
             return (
               <div key={i}>
                 <div style={{ position: 'absolute', left, width: 72, top, height: h, background: it.color, WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }} />
-                <div style={{ position: 'absolute', left, width: 72, textAlign: 'center', fontSize: 15, fontWeight: 900, top: it.diff >= 0 ? top - 20 : top + h + 2 }}>{it.label}</div>
+                <div style={{ position: 'absolute', left: left - 8, width: 88, textAlign: 'center', fontSize: 13, lineHeight: '16px', fontWeight: 900, top: it.diff >= 0 ? top - it.lines.length * 16 - 4 : top + h + 3 }}>
+                  {it.lines.map((l) => <div key={l}>{l}</div>)}
+                </div>
               </div>
             )
           })}
@@ -161,7 +175,7 @@ export function ReportPage({ kid, tests, sessionId, editable }: { kid: Kid; test
   const save = (patch: { conclusions?: string; suggestions?: string }) => setReportText(sessionId, kid.id, patch)
   const loc = SKILLS.filter((s) => s.subtest === 'loc'), obj = SKILLS.filter((s) => s.subtest === 'obj')
   const a = r.age
-  const box = { padding: '10px 16px', fontSize: 14, lineHeight: 1.45, minHeight: 90, whiteSpace: 'pre-wrap' as const }
+  const box = { padding: '10px 16px', fontSize: 13.5, lineHeight: 1.4, minHeight: 90, whiteSpace: 'pre-wrap' as const }
   const area = { ...box, width: '100%', border: 'none', resize: 'vertical' as const, fontFamily: 'inherit', background: '#FFFBEB', boxSizing: 'border-box' as const }
 
   return (
@@ -200,7 +214,7 @@ export function ReportPage({ kid, tests, sessionId, editable }: { kid: Kid; test
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', border: '2px solid #0A6FA8', borderRadius: 14, overflow: 'hidden', marginTop: 22 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', border: '2px solid #0A6FA8', borderRadius: 14, overflow: 'hidden', marginTop: 16 }}>
         {([['Conclusiones', conc, setConc, 'conclusions'], ['Sugerencias', sugg, setSugg, 'suggestions']] as const).map(([title, val, setVal, key], i) => (
           <div key={key} style={{ display: 'flex', flexDirection: 'column', borderRight: i === 0 ? '2px solid #0A6FA8' : 'none' }}>
             <div style={{ background: '#0A6FA8', color: '#fff', fontSize: 16, fontWeight: 900, padding: '8px 16px', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}>{title}</div>
