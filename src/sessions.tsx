@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { useStore, createSession, updateSession, deleteSession, type Session, type SessionMode } from './store'
+import { useStore, createSession, updateSession, deleteSession, scoreId, type Session, type SessionMode, type Kid, type Folder, type Score } from './store'
+import { progress } from './scoring'
 import { useSessionClips, deleteSessionClips, useStorageInfo, type ClipMeta } from './clips'
-import { CLIPS_PER_KID } from './skills'
+import { CLIPS_PER_KID, MARKS_PER_KID } from './skills'
 import { ageText } from './age'
 import { Sheet, Icon, Top } from './ui'
 import { tooSoonWarning } from './results'
@@ -22,15 +23,45 @@ export function okCount(clips: Map<string, ClipMeta> | null, kidId?: string) {
 }
 
 // ---------------- Lista de sesiones ----------------
+/** Nombre del grupo de la sesión: carpetas involucradas y, para niños sin carpeta, su nombre. */
+export function sessionTitle(s: Session, kids: Kid[], folders: Folder[]): string {
+  const names: string[] = []
+  for (const kid of s.kidIds) {
+    const k = kids.find((x) => x.id === kid)
+    if (!k) continue
+    const n = k.folderId ? folders.find((f) => f.id === k.folderId)?.name ?? 'Carpeta' : k.name
+    if (!names.includes(n)) names.push(n)
+  }
+  if (!names.length) return 'Sesión sin niños'
+  return names.length > 3 ? `${names.slice(0, 3).join(' + ')} y ${names.length - 3} más` : names.join(' + ')
+}
+
+/** Estado de la sesión: terminada = todos los criterios de todos los niños puntuados. */
+export function sessionStatus(s: Session, scores: Score[], clips: Map<string, ClipMeta> | null) {
+  if (!s.kidIds.length) return { done: false, label: 'Sin niños' }
+  const marked = s.kidIds.reduce((n, k) => n + progress(scores.find((x) => x.id === scoreId(s.id, k))).marked, 0)
+  const totalMarks = s.kidIds.length * MARKS_PER_KID
+  if (marked >= totalMarks) return { done: true, label: 'Terminada' }
+  const videos = okCount(clips), totalVideos = s.kidIds.length * CLIPS_PER_KID
+  if (clips && clips.size > 0 && videos < totalVideos) return { done: false, label: 'Falta grabar' }
+  return { done: false, label: marked ? 'Falta puntuar' : 'Pendiente' }
+}
+
 function SessionCard({ s }: { s: Session }) {
+  const { kids, folders, scores } = useStore()
   const clips = useSessionClips(s.id)
   const total = s.kidIds.length * CLIPS_PER_KID
   const done = okCount(clips)
+  const st = sessionStatus(s, scores, clips)
+  const color = st.done ? '#0B7A61' : '#B45309'
   return (
-    <Link to={`/sesion/${s.id}`} className="card" style={{ textDecoration: 'none', color: 'inherit' }}>
+    <Link to={`/sesion/${s.id}`} className="card" style={{ textDecoration: 'none', color: 'inherit', borderLeft: `6px solid ${color}`, background: st.done ? '#F1FAF6' : '#FFFBEB' }}>
       <span className="grow">
-        <span className="title">{dateText(s.date)}</span>
-        <span className="meta">{plural(s.kidIds.length)} · {s.mode === 'grupal' ? 'Grupal' : 'Individual'}</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span className="title" style={{ color }}>{sessionTitle(s, kids, folders)}</span>
+          <span style={{ fontSize: 12, fontWeight: 900, padding: '3px 8px', borderRadius: 6, background: color, color: '#fff' }}>{st.label}</span>
+        </span>
+        <span className="meta" style={{ fontWeight: 700, color: '#33414E' }}>{dateText(s.date)} · {plural(s.kidIds.length)}</span>
         <span className="meta">{total ? `${done} de ${total} videos grabados` : 'Sin niños todavía'}</span>
       </span>
       {Icon.chevron}
@@ -71,7 +102,6 @@ export function SessionView() {
   if (!s) return (<><Top title="Sesión" back="/sesiones" /><main className="content"><div className="empty">Esta sesión ya no existe.</div></main></>)
 
   const sessionKids = s.kidIds.map((kid) => kids.find((k) => k.id === kid)).filter(Boolean) as typeof kids
-  const folderCount = new Set(sessionKids.map((k) => k.folderId ?? 'sin')).size
   const setMode = (mode: SessionMode) => updateSession(s.id, { mode })
   const removeKid = (kidId: string) => updateSession(s.id, { kidIds: s.kidIds.filter((x) => x !== kidId), absent: s.absent.filter((x) => x !== kidId) })
   const folderKids = (fid: string | null) => kids.filter((k) => (fid === null ? !k.folderId : k.folderId === fid))
@@ -79,7 +109,7 @@ export function SessionView() {
 
   return (
     <>
-      <Top title={dateText(s.date)} sub={sessionKids.length ? `${plural(sessionKids.length)} de ${folderCount} ${folderCount === 1 ? 'carpeta' : 'carpetas'}` : 'Agrega a los niños'}
+      <Top title={sessionTitle(s, kids, folders)} sub={sessionKids.length ? `${dateText(s.date)} · ${plural(sessionKids.length)} · ${okCount(clips)} de ${sessionKids.length * CLIPS_PER_KID} videos` : `${dateText(s.date)} · Agrega a los niños`}
         back="/sesiones" right={<button className="icon-btn" aria-label="Opciones de la sesión" onClick={() => setSheet('delete')}>{Icon.trash}</button>} />
       <main className="content">
         <div className="field">

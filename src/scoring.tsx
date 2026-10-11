@@ -5,6 +5,7 @@ import { getClipBlob, clipKey, useSessionClips } from './clips'
 import { SKILLS, MARKS_PER_KID, skillById, maxScore, type Skill } from './skills'
 import { Icon, Top } from './ui'
 import { dateText } from './sessions'
+import { safeName } from './excel'
 
 const markKey = (skillId: string, i: number) => `${skillId}:${i}`
 const EMPTY: [Mark, Mark] = [null, null]
@@ -56,7 +57,8 @@ export function ScoreKids() {
 
 // ---------------- Reproductor con cámara lenta, cuadro a cuadro y zoom ----------------
 const FRAME = 1 / 30
-function Player({ blobKey }: { blobKey: string }) {
+function Player({ blobKey, photoName }: { blobKey: string; photoName: string }) {
+  const [toast, setToast] = useState('')
   const [url, setUrl] = useState<string | null>(null)
   const [missing, setMissing] = useState(false)
   const [speed, setSpeed] = useState(0.5)
@@ -81,6 +83,25 @@ function Player({ blobKey }: { blobKey: string }) {
   useEffect(() => { if (vref.current) vref.current.playbackRate = speed }, [speed, url])
 
   const v = () => vref.current
+  // Foto del cuadro actual: se descarga como imagen (aparece en la Galería, álbum Descargas).
+  const snap = () => {
+    const el = v()
+    if (!el || !el.videoWidth) return
+    el.pause()
+    const c = document.createElement('canvas')
+    c.width = el.videoWidth; c.height = el.videoHeight
+    c.getContext('2d')?.drawImage(el, 0, 0)
+    c.toBlob((b) => {
+      if (!b) return
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(b)
+      a.download = `${photoName}_${el.currentTime.toFixed(2).replace('.', 's')}.jpg`
+      document.body.appendChild(a); a.click(); a.remove()
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+      setToast('Foto guardada (Galería › Descargas)')
+      setTimeout(() => setToast(''), 2500)
+    }, 'image/jpeg', 0.92)
+  }
   const toggle = () => { const el = v(); if (!el) return; if (el.paused) { el.playbackRate = speed; el.play() } else el.pause() }
   const step = (dir: 1 | -1) => { const el = v(); if (!el) return; el.pause(); el.currentTime = Math.max(0, Math.min(el.duration || 0, el.currentTime + dir * FRAME)) }
   const clampPan = (p: { x: number; y: number }, z: number) => {
@@ -137,6 +158,7 @@ function Player({ blobKey }: { blobKey: string }) {
             onDurationChange={(e) => { if (isFinite(e.currentTarget.duration)) setDur(e.currentTarget.duration) }}
             style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`, transition: pointers.current.size ? 'none' : 'transform .15s' }} />
         )}
+        {toast && <div role="status" style={{ position: 'absolute', left: '50%', bottom: 18, transform: 'translateX(-50%)', whiteSpace: 'nowrap', background: 'rgba(11,122,97,.95)', color: '#fff', fontSize: 13, fontWeight: 700, padding: '6px 10px', borderRadius: 8, zIndex: 2 }}>{toast}</div>}
         {missing && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#B8C4CF', padding: 20, textAlign: 'center', fontSize: 15 }}>No hay video de este intento en este celular (se saltó o no se grabó). Igual puedes marcar los criterios.</div>}
         {url && (
           <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(0,0,0,.6)', borderRadius: 12, padding: 4 }}>
@@ -161,6 +183,9 @@ function Player({ blobKey }: { blobKey: string }) {
             <span style={{ flex: 1 }} />
             <button aria-label="Cuadro anterior" style={sq} onClick={() => step(-1)}>⏮</button>
             <button aria-label="Cuadro siguiente" style={sq} onClick={() => step(1)}>⏭</button>
+            <button aria-label="Sacar foto de este cuadro" style={{ ...sq, background: '#0A6FA8', border: 'none', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={snap}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>
+            </button>
           </div>
         </div>
       )}
@@ -251,7 +276,7 @@ export function ScoreSkill() {
         ))}
       </div>
 
-      <Player blobKey={clipKey(s.id, kid.id, skill.id, attempt)} />
+      <Player blobKey={clipKey(s.id, kid.id, skill.id, attempt)} photoName={safeName(`${kid.name}_${skill.name}_I${attempt}`)} />
 
       <main style={{ flex: 1, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, fontSize: 12, fontWeight: 700, color: 'var(--muted)', paddingRight: 2 }}>
