@@ -351,7 +351,13 @@ export function Login() {
       <img src="./icon.svg" alt="" width={88} height={88} />
       <h1 style={{ margin: 0, fontSize: 28 }}>TGMD-2</h1>
       <p style={{ margin: 0, color: 'var(--muted)', fontSize: 16 }}>Entra con tu cuenta de Google para ver tus carpetas en el celular y en la computadora.</p>
-      <button className="btn primary" onClick={() => login().catch(() => setErr('No se pudo iniciar sesión. Intenta otra vez.'))}>Entrar con Google</button>
+      <button className="btn primary" onClick={() => login().catch((e) => {
+        const code = String(e?.code || '')
+        if (code.includes('popup-closed') || code.includes('cancelled-popup')) return
+        if (code.includes('unauthorized-domain')) setErr('Falta autorizar esta dirección en Firebase (Authentication → Configuración → Dominios autorizados).')
+        else if (code.includes('operation-not-allowed')) setErr('Falta activar el inicio de sesión con Google en Firebase (Authentication → Método de acceso).')
+        else setErr(`No se pudo iniciar sesión. Intenta otra vez. (${code || 'error'})`)
+      })}>Entrar con Google</button>
       {err && <div className="banner warn">{err}</div>}
     </main>
   )

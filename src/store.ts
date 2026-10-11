@@ -5,7 +5,7 @@
 import { useSyncExternalStore } from 'react'
 import { initializeApp } from 'firebase/app'
 import {
-  getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut, type User,
+  getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signInWithRedirect, signOut, type User,
 } from 'firebase/auth'
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
@@ -106,7 +106,19 @@ if (cloudEnabled) {
 
 export async function login() {
   if (!cloudEnabled) return
-  await signInWithPopup(getAuth(), new GoogleAuthProvider())
+  const provider = new GoogleAuthProvider()
+  provider.setCustomParameters({ prompt: 'select_account' })
+  try {
+    await signInWithPopup(getAuth(), provider)
+  } catch (e) {
+    // Si el navegador bloquea la ventana emergente, se usa la redirección.
+    const code = (e as { code?: string }).code || ''
+    if (code.includes('popup-blocked') || code.includes('operation-not-supported')) {
+      await signInWithRedirect(getAuth(), provider)
+    } else {
+      throw e
+    }
+  }
 }
 export async function logout() {
   if (cloudEnabled) await signOut(getAuth())
