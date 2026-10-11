@@ -4,6 +4,7 @@ import { FolderList, FolderView, KidForm, Settings, Login } from './screens'
 import { SessionList, SessionView } from './sessions'
 import { Recorder } from './recorder'
 import { ScoreKids, ScoreSkill } from './scoring'
+import { ResultList, ResultView } from './results'
 import { BottomNav } from './ui'
 
 function Shell() {
@@ -28,6 +29,8 @@ function Shell() {
         <Route path="/sesion/:id/grabar" element={<Recorder />} />
         <Route path="/sesion/:id/puntuar" element={<ScoreKids />} />
         <Route path="/sesion/:id/puntuar/:kidId/:skillId" element={<ScoreSkill />} />
+        <Route path="/sesion/:id/resultados" element={<ResultList />} />
+        <Route path="/sesion/:id/resultados/:kidId" element={<ResultView />} />
         <Route path="/ajustes" element={<Settings />} />
       </Routes>
       {!fullScreen && <BottomNav />}

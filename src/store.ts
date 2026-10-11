@@ -14,6 +14,7 @@ import {
   type Firestore,
 } from 'firebase/firestore'
 import { firebaseConfig } from './firebase-config'
+import { validateNorms, type Norms } from './calc'
 
 export type Sex = 'M' | 'F' | ''
 /** D = derecha, I = izquierda, A = ambidiestro, N = no establecida */
@@ -57,6 +58,7 @@ export interface Score {
 }
 interface Data { folders: Folder[]; kids: Kid[]; sessions: Session[]; scores: Score[] }
 interface State extends Data {
+  norms: Norms | null
   mode: 'local' | 'nube'
   ready: boolean
   user: { uid: string; name: string; email: string } | null
@@ -67,6 +69,7 @@ type Col = keyof Data
 // VITE_LOCAL=1 fuerza el modo local (solo para pruebas automáticas).
 const cloudEnabled = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId) && import.meta.env.VITE_LOCAL !== '1'
 const LOCAL_KEY = 'tgmd-datos-v1'
+const NORMS_KEY = 'tgmd-normas'
 
 let state: State = {
   mode: cloudEnabled ? 'nube' : 'local',
@@ -76,6 +79,7 @@ let state: State = {
   kids: [],
   sessions: [],
   scores: [],
+  norms: null,
   error: null,
 }
 const listeners = new Set<() => void>()
@@ -147,9 +151,20 @@ if (cloudEnabled) {
       readError,
     ))
     listen('folders'); listen('kids'); listen('sessions'); listen('scores')
+    // Tablas normativas privadas del evaluador (guardadas como texto: Firestore no admite listas dentro de listas).
+    unsubs.push(onSnapshot(doc(db!, 'norms', u.uid), (d) => {
+      try {
+        const parsed = d.exists() ? JSON.parse((d.data() as { json: string }).json) : null
+        set({ norms: validateNorms(parsed) ? parsed : null })
+      } catch { set({ norms: null }) }
+    }, readError))
   })
 } else {
   loadLocal()
+  try {
+    const n = JSON.parse(localStorage.getItem(NORMS_KEY) || 'null')
+    if (validateNorms(n)) set({ norms: n })
+  } catch { /* sin tablas */ }
 }
 
 export async function login() {
@@ -274,6 +289,18 @@ export function setMarks(sessionId: string, kidId: string, key: string, value: [
       : { id, sessionId, kidId, ownerId: uid(), createdAt: Date.now(), marks: { [key]: value } }
     saveLocal({ scores: [...state.scores.filter((x) => x.id !== id), sc] })
   }
+}
+
+// ---------- Tablas normativas ----------
+/** Guarda las tablas del manual en la cuenta del evaluador. Devuelve false si el archivo no es válido. */
+export function saveNorms(text: string): boolean {
+  let parsed: unknown
+  try { parsed = JSON.parse(text) } catch { return false }
+  if (!validateNorms(parsed)) return false
+  if (db) bg(setDoc(doc(db, 'norms', uid()), { id: uid(), ownerId: uid(), json: JSON.stringify(parsed), createdAt: Date.now() }))
+  else { try { localStorage.setItem(NORMS_KEY, JSON.stringify(parsed)) } catch { /* sin espacio */ } }
+  set({ norms: parsed })
+  return true
 }
 
 // ---------- Respaldo ----------

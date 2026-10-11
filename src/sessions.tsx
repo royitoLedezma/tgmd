@@ -5,6 +5,7 @@ import { useSessionClips, deleteSessionClips, useStorageInfo, type ClipMeta } fr
 import { CLIPS_PER_KID } from './skills'
 import { ageText } from './age'
 import { Sheet, Icon, Top } from './ui'
+import { tooSoonWarning } from './results'
 
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
 export function dateText(iso: string) {
@@ -82,6 +83,10 @@ export function SessionView() {
         back="/sesiones" right={<button className="icon-btn" aria-label="Opciones de la sesión" onClick={() => setSheet('delete')}>{Icon.trash}</button>} />
       <main className="content">
         <div className="field">
+          <label htmlFor="sdate">Fecha del test</label>
+          <input id="sdate" className="input" type="date" value={s.date} onChange={(e) => e.target.value && updateSession(s.id, { date: e.target.value })} />
+        </div>
+        <div className="field">
           <span className="label">¿Cómo vas a grabar?</span>
           <div className="seg c2">
             <button className={s.mode === 'grupal' ? 'on' : ''} aria-pressed={s.mode === 'grupal'} onClick={() => setMode('grupal')}>Grupal · por estaciones</button>
@@ -99,7 +104,7 @@ export function SessionView() {
         {sessionKids.map((k) => {
           const done = okCount(clips, k.id)
           const folder = folders.find((f) => f.id === k.folderId)?.name ?? 'Sin carpeta'
-          const warn = !k.birthDate ? 'Falta la fecha de nacimiento' : !k.sex ? 'Falta el sexo' : null
+          const warn = !k.birthDate ? 'Falta la fecha de nacimiento' : !k.sex ? 'Falta el sexo' : tooSoonWarning(sessions, k.id, s)
           return (
             <div key={k.id} className={`card${warn ? ' warn' : ''}`} style={{ padding: '10px 4px 10px 14px', minHeight: 60 }}>
               <span className="grow">
@@ -125,9 +130,10 @@ export function SessionView() {
         )}
       </main>
       <div className="footer">
-        <div className="seg c2" style={{ gap: 8 }}>
-          <button className="btn" style={{ background: '#D7263D', color: '#fff', border: 'none' }} disabled={!sessionKids.length} onClick={() => nav(`/sesion/${s.id}/grabar`)}>● Grabar</button>
-          <button className="btn primary" style={{ border: 'none' }} disabled={!sessionKids.length} onClick={() => nav(`/sesion/${s.id}/puntuar`)}>✓ Puntuar</button>
+        <div className="seg c3" style={{ gap: 8 }}>
+          <button className="btn" style={{ background: '#D7263D', color: '#fff', border: 'none', fontSize: 15 }} disabled={!sessionKids.length} onClick={() => nav(`/sesion/${s.id}/grabar`)}>● Grabar</button>
+          <button className="btn primary" style={{ border: 'none', fontSize: 15 }} disabled={!sessionKids.length} onClick={() => nav(`/sesion/${s.id}/puntuar`)}>✓ Puntuar</button>
+          <button className="btn" style={{ background: '#0B7A61', color: '#fff', border: 'none', fontSize: 15 }} disabled={!sessionKids.length} onClick={() => nav(`/sesion/${s.id}/resultados`)}>Resultados</button>
         </div>
       </div>
 

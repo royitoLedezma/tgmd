@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   useStore, createFolder, renameFolder, deleteFolder, createKid, updateKid, deleteKid,
-  backupJson, restoreBackup, login, logout, updateSession, getState, type Kid, type Sex, type Side,
+  backupJson, restoreBackup, login, logout, saveNorms, updateSession, getState, type Kid, type Sex, type Side,
 } from './store'
 import { ageText, isOverMax } from './age'
 import { Sheet, Icon, Top } from './ui'
@@ -266,7 +266,8 @@ export function KidForm() {
 
 // ---------------- Ajustes ----------------
 export function Settings() {
-  const { mode, user, folders, kids } = useStore()
+  const { mode, user, folders, kids, norms } = useStore()
+  const [normMsg, setNormMsg] = useState<{ kind: 'ok' | 'warn'; text: string } | null>(null)
   const [msg, setMsg] = useState<{ kind: 'ok' | 'warn'; text: string } | null>(null)
 
   const download = () => {
@@ -300,6 +301,20 @@ export function Settings() {
             <button className="btn ghost" style={{ width: 'auto', padding: '0 14px', height: 44, fontSize: 15 }} onClick={logout}>Salir</button>
           </div>
         )}
+        <div className="section-title">Tablas normativas (privadas)</div>
+        {norms
+          ? <div className="banner ok">Tablas cargadas en tu cuenta. Se usan para el puntaje estándar, percentil, edad equivalente y GMQ.</div>
+          : <div className="banner warn">Aún no cargaste las tablas del manual. Sin ellas solo se calculan los puntajes brutos y los %.</div>}
+        <label className="btn ghost" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {norms ? 'Reemplazar archivo de tablas' : 'Cargar archivo de tablas'}
+          <input type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={async (e) => {
+            const f = e.target.files?.[0]
+            if (!f) return
+            const ok = saveNorms(await f.text())
+            setNormMsg(ok ? { kind: 'ok', text: 'Tablas guardadas.' } : { kind: 'warn', text: 'Ese archivo no es el de las tablas del TGMD-2.' })
+          }} />
+        </label>
+        {normMsg && <div className={`banner ${normMsg.kind}`}>{normMsg.text}</div>}
         <InstallBlock />
         <div className="section-title">Respaldo</div>
         <div className="banner info">Guarda una copia de tus carpetas y niños ({folders.length} carpetas, {plural(kids.length)}) en un archivo. Puedes subirlo a tu Drive.</div>
@@ -310,7 +325,7 @@ export function Settings() {
         </label>
         {msg && <div className={`banner ${msg.kind}`}>{msg.text}</div>}
         <div className="section-title">Versión</div>
-        <div className="meta" style={{ color: 'var(--muted)', fontSize: 14 }}>Etapa 3 · Puntuación con video</div>
+        <div className="meta" style={{ color: 'var(--muted)', fontSize: 14 }}>Etapa 4 · Cálculos y tablas normativas</div>
       </main>
     </>
   )
