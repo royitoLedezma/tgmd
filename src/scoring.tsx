@@ -88,9 +88,19 @@ function Player({ blobKey, photoName }: { blobKey: string; photoName: string }) 
     const el = v()
     if (!el || !el.videoWidth) return
     el.pause()
+    // Recorta exactamente lo que se ve en pantalla (zoom + desplazamiento).
+    const W = el.clientWidth, H = el.clientHeight, vw = el.videoWidth, vh = el.videoHeight
+    const s0 = Math.min(W / vw, H / vh)
+    const ox = (W - vw * s0) / 2, oy = (H - vh * s0) / 2
+    const toVideo = (sx: number, sy: number) => {
+      const ex = W / 2 + (sx - W / 2 - pan.x) / zoom, ey = H / 2 + (sy - H / 2 - pan.y) / zoom
+      return [Math.min(vw, Math.max(0, (ex - ox) / s0)), Math.min(vh, Math.max(0, (ey - oy) / s0))]
+    }
+    const [x0, y0] = toVideo(0, 0), [x1, y1] = toVideo(W, H)
+    const cw = Math.max(1, Math.round(x1 - x0)), ch = Math.max(1, Math.round(y1 - y0))
     const c = document.createElement('canvas')
-    c.width = el.videoWidth; c.height = el.videoHeight
-    c.getContext('2d')?.drawImage(el, 0, 0)
+    c.width = cw; c.height = ch
+    c.getContext('2d')?.drawImage(el, x0, y0, x1 - x0, y1 - y0, 0, 0, cw, ch)
     c.toBlob((b) => {
       if (!b) return
       const a = document.createElement('a')
@@ -98,7 +108,7 @@ function Player({ blobKey, photoName }: { blobKey: string; photoName: string }) 
       a.download = `${photoName}_${el.currentTime.toFixed(2).replace('.', 's')}.jpg`
       document.body.appendChild(a); a.click(); a.remove()
       setTimeout(() => URL.revokeObjectURL(a.href), 5000)
-      setToast('Foto guardada (Galería › Descargas)')
+      setToast(zoom > 1 ? 'Foto recortada guardada (Galería › Descargas)' : 'Foto guardada (Galería › Descargas)')
       setTimeout(() => setToast(''), 2500)
     }, 'image/jpeg', 0.92)
   }
