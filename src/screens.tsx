@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   useStore, createFolder, renameFolder, deleteFolder, createKid, updateKid, deleteKid,
-  backupJson, restoreBackup, login, logout, type Kid, type Sex, type Side,
+  backupJson, restoreBackup, login, logout, type Kid, type Sex, type Side, type LR,
 } from './store'
 import { ageText, isOverMax } from './age'
 import { Sheet, Icon } from './ui'
@@ -178,7 +178,7 @@ export function FolderView() {
 }
 
 // ---------------- Ficha del niño ----------------
-function Seg<T extends string>({ value, options, onChange, cols }: { value: T; options: [T, string][]; onChange: (v: T) => void; cols: 2 | 3 }) {
+function Seg<T extends string>({ value, options, onChange, cols }: { value: T; options: [T, string][]; onChange: (v: T) => void; cols: 2 | 3 | 4 }) {
   return (
     <div className={`seg c${cols}`}>
       {options.map(([v, label]) => (
@@ -200,6 +200,8 @@ export function KidForm() {
   const [sex, setSex] = useState<Sex>(existing?.sex ?? '')
   const [hand, setHand] = useState<Side>(existing?.hand ?? '')
   const [foot, setFoot] = useState<Side>(existing?.foot ?? '')
+  const [eye, setEye] = useState<LR>(existing?.eye ?? '')
+  const [turn, setTurn] = useState<LR>(existing?.turn ?? '')
   const [folderId, setFolderId] = useState<string>(existing ? existing.folderId ?? NONE : startFolder ?? NONE)
   const [saving, setSaving] = useState(false)
 
@@ -207,11 +209,12 @@ export function KidForm() {
     return (<><Top title="Niño" back="/" /><main className="content"><div className="empty">No se encontró a este niño.</div></main></>)
   }
   const backTo = `/carpeta/${existing ? existing.folderId ?? NONE : startFolder ?? NONE}`
-  const sides: [Side, string][] = [['D', 'Derecha'], ['I', 'Izquierda'], ['N', 'No establecida']]
+  const sides: [Side, string][] = [['D', 'Derecha'], ['I', 'Izquierda'], ['A', 'Ambidiestro'], ['N', 'No establecida']]
+  const lr: [LR, string][] = [['D', 'Derecha'], ['I', 'Izquierda']]
 
   const save = async () => {
     setSaving(true)
-    const data = { name, birthDate, sex, hand, foot, folderId: folderId === NONE ? null : folderId }
+    const data = { name, birthDate, sex, hand, foot, eye, turn, folderId: folderId === NONE ? null : folderId }
     if (existing) await updateKid(existing.id, data)
     else await createKid(data)
     nav(`/carpeta/${folderId}`)
@@ -237,11 +240,19 @@ export function KidForm() {
         </div>
         <div className="field">
           <span className="label">Mano preferida</span>
-          <Seg cols={3} value={hand} onChange={setHand} options={sides} />
+          <Seg cols={2} value={hand} onChange={setHand} options={sides} />
         </div>
         <div className="field">
           <span className="label">Pie preferido</span>
-          <Seg cols={3} value={foot} onChange={setFoot} options={sides} />
+          <Seg cols={2} value={foot} onChange={setFoot} options={sides} />
+        </div>
+        <div className="field">
+          <span className="label">Ojo preferido</span>
+          <Seg cols={2} value={eye} onChange={setEye} options={lr} />
+        </div>
+        <div className="field">
+          <span className="label">Giro preferido</span>
+          <Seg cols={2} value={turn} onChange={setTurn} options={lr} />
         </div>
         <div className="field">
           <label htmlFor="kfolder">Carpeta</label>

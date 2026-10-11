@@ -15,7 +15,10 @@ import {
 import { firebaseConfig } from './firebase-config'
 
 export type Sex = 'M' | 'F' | ''
-export type Side = 'D' | 'I' | 'N' | ''
+/** D = derecha, I = izquierda, A = ambidiestro, N = no establecida */
+export type Side = 'D' | 'I' | 'A' | 'N' | ''
+/** Solo derecha o izquierda (ojo y giro preferidos) */
+export type LR = 'D' | 'I' | ''
 
 export interface Folder { id: string; name: string; ownerId: string; createdAt: number }
 export interface Kid {
@@ -25,6 +28,8 @@ export interface Kid {
   sex: Sex
   hand: Side
   foot: Side
+  eye: LR
+  turn: LR
   folderId: string | null // null = "Sin carpeta"
   ownerId: string
   createdAt: number
