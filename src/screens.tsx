@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   useStore, createFolder, renameFolder, deleteFolder, createKid, updateKid, deleteKid,
-  backupJson, restoreBackup, login, logout, type Kid, type Sex, type Side, type LR,
+  backupJson, restoreBackup, login, logout, type Kid, type Sex, type Side,
 } from './store'
 import { ageText, isOverMax } from './age'
 import { Sheet, Icon } from './ui'
@@ -200,8 +200,8 @@ export function KidForm() {
   const [sex, setSex] = useState<Sex>(existing?.sex ?? '')
   const [hand, setHand] = useState<Side>(existing?.hand ?? '')
   const [foot, setFoot] = useState<Side>(existing?.foot ?? '')
-  const [eye, setEye] = useState<LR>(existing?.eye ?? '')
-  const [turn, setTurn] = useState<LR>(existing?.turn ?? '')
+  const [eye, setEye] = useState<Side>(existing?.eye ?? '')
+  const [turn, setTurn] = useState<Side>(existing?.turn ?? '')
   const [folderId, setFolderId] = useState<string>(existing ? existing.folderId ?? NONE : startFolder ?? NONE)
   const [saving, setSaving] = useState(false)
 
@@ -210,7 +210,6 @@ export function KidForm() {
   }
   const backTo = `/carpeta/${existing ? existing.folderId ?? NONE : startFolder ?? NONE}`
   const sides: [Side, string][] = [['D', 'Derecha'], ['I', 'Izquierda'], ['A', 'Ambidiestro'], ['N', 'No establecida']]
-  const lr: [LR, string][] = [['D', 'Derecha'], ['I', 'Izquierda']]
 
   const save = async () => {
     setSaving(true)
@@ -248,11 +247,11 @@ export function KidForm() {
         </div>
         <div className="field">
           <span className="label">Ojo preferido</span>
-          <Seg cols={2} value={eye} onChange={setEye} options={lr} />
+          <Seg cols={2} value={eye} onChange={setEye} options={sides} />
         </div>
         <div className="field">
           <span className="label">Giro preferido</span>
-          <Seg cols={2} value={turn} onChange={setTurn} options={lr} />
+          <Seg cols={2} value={turn} onChange={setTurn} options={sides} />
         </div>
         <div className="field">
           <label htmlFor="kfolder">Carpeta</label>
