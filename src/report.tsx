@@ -94,8 +94,14 @@ function ageDiffText(months: number) {
 
 /** "5-6" → ["5 años", "6 meses"]; "<3-0" → ["menos de", "3 años"]; ">10-9" → ["más de", "10 años", "9 meses"] */
 function aeLines(ae: string): string[] {
-  const pre = ae.startsWith('<') ? ['menos de'] : ae.startsWith('>') ? ['más de'] : []
-  const [y, m] = ae.replace(/[<>]/g, '').split('-').map(Number)
+  const [y0, m0] = ae.replace(/[<>]/g, '').split('-').map(Number)
+  if (ae.startsWith('>')) {
+    // Por encima del máximo de la tabla: se redondea al año siguiente ("más de 11 años").
+    const yy = y0 + (m0 ? 1 : 0)
+    return ['más de', `${yy} años`]
+  }
+  const pre = ae.startsWith('<') ? ['menos de'] : []
+  const y = y0, m = m0
   const out = [...pre, `${y} ${y === 1 ? 'año' : 'años'}`]
   if (m) out.push(`${m} ${m === 1 ? 'mes' : 'meses'}`)
   return out
@@ -106,8 +112,8 @@ function AgeChart({ tests, sub, light, strong }: { tests: TestData[]; sub: 'loc'
     const ae = t.result[sub].ae
     const chrono = t.result.normMonths
     if (!ae || chrono === null) return null
-    const aeM = ae.startsWith('<') ? aeToMonths(ae) - 1 : ae.startsWith('>') ? aeToMonths(ae) + 1 : aeToMonths(ae)
-    return { lines: aeLines(ae), diff: aeM - chrono, color: i === tests.length - 1 ? strong : light, ink: i === tests.length - 1 && sub === 'obj' ? '#fff' : '#1B2733' }
+    const aeM = ae.startsWith('<') ? aeToMonths(ae) - 1 : ae.startsWith('>') ? Math.ceil(aeToMonths(ae) / 12) * 12 : aeToMonths(ae)
+    return { gt: ae.startsWith('>'), lines: aeLines(ae), diff: aeM - chrono, color: i === tests.length - 1 ? strong : light, ink: i === tests.length - 1 && sub === 'obj' ? '#fff' : '#1B2733' }
   })
   const valid = items.filter(Boolean) as NonNullable<(typeof items)[number]>[]
   if (!valid.length) return <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#5A6B7B', fontSize: 13 }}>Sin datos de edad equivalente</div>
@@ -147,7 +153,7 @@ function AgeChart({ tests, sub, light, strong }: { tests: TestData[]; sub: 'loc'
           <div style={{ position: 'absolute', right: 0, top: lo === 0 ? zeroY - 20 : zeroY + 6, fontSize: 12, fontWeight: 900, color: '#0A6FA8' }}>Edad cronológica</div>
         </div>
       </div>
-      <div style={{ fontSize: 13, color: '#33414E' }}>{tests.length > 1 ? '2° test' : 'Test'}: <strong>{ageDiffText(last.diff)}</strong></div>
+      <div style={{ fontSize: 13, color: '#33414E' }}>{tests.length > 1 ? '2° test' : 'Test'}: <strong>{last.gt ? 'más de ' : ''}{ageDiffText(last.diff)}</strong></div>
     </div>
   )
 }
