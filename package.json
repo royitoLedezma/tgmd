@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/cormorant-garamond": "^5.3.0",
+    "@fontsource/manrope": "^5.3.0",
     "exceljs": "^4.4.0",
     "firebase": "^13.0.0",
     "jszip": "^3.10.2",

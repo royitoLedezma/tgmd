@@ -9,6 +9,8 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Las letras del informe van incluidas para que funcione sin internet.
+      workbox: { globPatterns: ['**/*.{js,css,html,woff2}'] },
       includeAssets: ['icon.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'],
       manifest: {
         name: 'TGMD-2 Evaluación motora',

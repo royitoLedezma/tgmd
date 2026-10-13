@@ -1,13 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { useStore, scoreId, setReportText, type Kid, type Score, type Session } from './store'
-import { computeResult, aeToMonths, dateFromIso, type Norms, type Result } from './calc'
-import { SKILLS, type Skill } from './skills'
+import { useStore, scoreId, setReportText, evaluatorName, type Kid, type Score, type Session, type Side } from './store'
+import { computeResult, aeToMonths, dateFromIso, addMonths, type Norms, type Result } from './calc'
+import { SKILLS } from './skills'
 import type { TestData } from './excel'
 import { exportFoldersOf, folderLabel } from './exports'
-
-const MONTHS_LONG = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
-const longDate = (iso: string) => { const d = dateFromIso(iso); return `${d.getDate()} / ${MONTHS_LONG[d.getMonth()]} / ${d.getFullYear()}` }
 
 /** Tests del niño hasta esta sesión (como máximo los 2 últimos: 1° anterior y 2° actual). */
 export function kidTests(kid: Kid, upTo: Session, sessions: Session[], scores: Score[], norms: Norms | null): TestData[] {
@@ -22,218 +19,454 @@ export function kidTests(kid: Kid, upTo: Session, sessions: Session[], scores: S
   })
 }
 
-// ---------- Borrador automático de conclusiones ----------
-export function draftTexts(kid: Kid, t: TestData): { conclusions: string; suggestions: string } {
+/** Número de evaluación del niño en esta sesión (1 = primera). */
+function evalNumber(kid: Kid, upTo: Session, sessions: Session[], scores: Score[]) {
+  return sessions.filter((s) => s.kidIds.includes(kid.id) && (s.id === upTo.id || (s.date < upTo.date && scores.some((x) => x.id === scoreId(s.id, kid.id))))).length
+}
+
+// ---------- Textos ----------
+const MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+const longDate = (iso: string) => { const d = dateFromIso(iso); return `${d.getDate()} de ${MONTHS[d.getMonth()]} de ${d.getFullYear()}` }
+const ORDINAL = ['', 'Primera', 'Segunda', 'Tercera', 'Cuarta', 'Quinta', 'Sexta', 'Séptima', 'Octava', 'Novena', 'Décima']
+const evalTitle = (n: number) => (ORDINAL[n] ? `${ORDINAL[n]} evaluación` : `Evaluación N.º ${n}`)
+const list = (xs: string[]) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} y ${xs[xs.length - 1]}`)
+const pctText = (p: number) => `${p.toFixed(1)} %`
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
+function preferences(k: Kid): string {
+  const part = (v: Side, d: string, i: string, a: string) => (v === 'D' ? d : v === 'I' ? i : v === 'A' ? a : '')
+  const xs = [
+    part(k.hand, 'mano derecha', 'mano izquierda', 'ambas manos'),
+    part(k.foot, 'pie derecho', 'pie izquierdo', 'ambos pies'),
+    part(k.eye, 'ojo derecho', 'ojo izquierdo', 'ambos ojos'),
+    part(k.turn, 'giro a la derecha', 'giro a la izquierda', 'giro a ambos lados'),
+  ].filter(Boolean)
+  const s = xs.join(', ')
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''
+}
+
+const LEVELS = ['Muy pobre', 'Pobre', 'Bajo el promedio', 'Promedio', 'Sobre el promedio', 'Superior', 'Muy superior']
+const levelIdx = (r: Result) => (r.rating ? LEVELS.indexOf(r.rating.es) : -1)
+function expectation(r: Result): string {
+  const i = levelIdx(r)
+  return i >= 4 ? 'por encima de lo esperado' : i === 3 ? 'acorde a lo esperado' : 'por debajo de lo esperado'
+}
+function levelPhrase(r: Result): string {
+  switch (r.rating?.es) {
+    case 'Muy superior': return 'muy superior a lo esperado'
+    case 'Superior': return 'superior a lo esperado'
+    case 'Sobre el promedio': return 'sobre el promedio'
+    case 'Promedio': return 'dentro del promedio'
+    case 'Bajo el promedio': return 'bajo el promedio'
+    default: return 'por debajo de lo esperado'
+  }
+}
+
+// ---------- Borrador automático de conclusiones y recomendaciones ----------
+export function draftTexts(kid: Kid, t: TestData, prev?: TestData): { conclusions: string; suggestions: string } {
   const r = t.result
   const name = kid.name.split(' ')[0]
-  const sorted = [...r.skills].sort((a, b) => a.pct - b.pct)
-  const weak = sorted.filter((x) => x.pct < 75).slice(0, 3)
-  const strong = [...r.skills].sort((a, b) => b.pct - a.pct).filter((x) => x.pct >= 85).slice(0, 3)
-  const failed = (sk: Skill) => sk.criteria
-    .map((c, i) => ({ c, v: t.score?.marks[`${sk.id}:${i}`] ?? [null, null] }))
-    .filter((x) => x.v[0] !== 1 && x.v[1] !== 1)
-    .map((x) => x.c.short.charAt(0).toLowerCase() + x.c.short.slice(1))
-  const list = (xs: string[]) => xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} y ${xs[xs.length - 1]}`
-  const parts: string[] = []
-  if (r.rating && r.gmq !== null) parts.push(`${name} obtuvo un cociente motor (GMQ) de ${r.gmq}, en la categoría "${r.rating.es}".`)
-  if (strong.length) parts.push(`Sus fortalezas están en ${list(strong.map((x) => x.skill.name.toLowerCase()))}.`)
-  if (weak.length) {
-    const details = weak.map((x) => { const f = failed(x.skill); return f.length ? `${x.skill.name.toLowerCase()} (${list(f.slice(0, 2))})` : x.skill.name.toLowerCase() })
-    parts.push(`El área de mejora está en ${list(details)}.`)
-  } else parts.push('Muestra un buen dominio en todas las habilidades evaluadas.')
-  const sugg = weak.length
-    ? `Enfocar los ejercicios en ${list(weak.map((x) => x.skill.name.toLowerCase()))}, trabajando especialmente ${list([...new Set(weak.flatMap((x) => failed(x.skill).slice(0, 1)))])}. Mantener actividades variadas que refuercen las habilidades ya logradas.`
-    : 'Mantener actividades variadas que sostengan su buen nivel e incorporar desafíos de mayor dificultad en coordinación, ritmo y precisión.'
-  return { conclusions: parts.join(' '), suggestions: sugg }
+  const pron = kid.sex === 'F' ? 'la' : 'lo'
+  const p1 = r.rating
+    ? `${name} presenta un desarrollo motor ${levelPhrase(r)} para su edad`
+    : `${name} logró el ${pctText(r.loc.pct)} en locomoción y el ${pctText(r.obj.pct)} en control de objetos`
+  let progress = '.'
+  if (prev) {
+    const better = r.skills.filter((s) => s.pct > (prev.result.skills.find((x) => x.skill.id === s.skill.id)?.pct ?? 0)).length
+    const notWorse = r.skills.every((s) => s.pct >= (prev.result.skills.find((x) => x.skill.id === s.skill.id)?.pct ?? 0))
+    progress = notWorse ? ' y mejoró o mantuvo su nivel en todas las habilidades evaluadas.' : better ? ` y mejoró en ${better} de las ${r.skills.length} habilidades evaluadas.` : '.'
+  }
+  const d = r.loc.pct - r.obj.pct
+  const area = Math.abs(d) >= 5 ? `Su principal fortaleza es ${d > 0 ? 'la locomoción' : 'el control de objetos'}.` : 'Muestra un desarrollo equilibrado entre locomoción y control de objetos.'
+  const weak = [...r.skills].filter((s) => s.pct < 100).sort((a, b) => a.pct - b.pct).slice(0, 2).map((s) => s.skill.name.toLowerCase())
+  const weakText = weak.length === 0 ? 'Domina todas las habilidades evaluadas.'
+    : weak.length === 1 ? `La habilidad con mayor margen de mejora es ${weak[0]}.`
+    : `Las habilidades con mayor margen de mejora son ${list(weak)}.`
+  const conclusions = `${p1}${progress}\n${area} ${weakText}`
+  const suggestions = [
+    `Mantener una práctica motriz variada: distintos juegos, deportes y entornos que ${pron} desafíen de muchas maneras.`,
+    weak.length
+      ? `Dar un estímulo extra a ${list(weak)} dentro de esa variedad, sin descuidar las demás experiencias de movimiento.`
+      : 'Sumar desafíos nuevos y de mayor dificultad dentro de esa variedad para seguir progresando.',
+    'Favorecer el juego libre y activo con otros niños, una fuente valiosa de aprendizaje motor.',
+  ].join('\n')
+  return { conclusions, suggestions }
 }
 
-// ---------- Gráficos ----------
-const C = 150, R = 100
-const pt = (i: number, v: number) => {
-  const a = ((-90 + 60 * i) * Math.PI) / 180
-  return `${(C + R * v * Math.cos(a)).toFixed(1)},${(C + R * v * Math.sin(a)).toFixed(1)}`
-}
-const ring = (v: number) => [0, 1, 2, 3, 4, 5].map((i) => pt(i, v)).join(' ')
-const LABEL_POS: { x: number; y: number; anchor: 'middle' | 'start' | 'end'; inline: boolean }[] = [
-  { x: 150, y: 22, anchor: 'middle', inline: true },
-  { x: 246, y: 92, anchor: 'start', inline: false },
-  { x: 246, y: 206, anchor: 'start', inline: false },
-  { x: 150, y: 280, anchor: 'middle', inline: true },
-  { x: 54, y: 206, anchor: 'end', inline: false },
-  { x: 54, y: 92, anchor: 'end', inline: false },
-]
+// ---------- Estilo ----------
+const INK = '#16203A', BODY = '#2E3648', MUTED = '#5D6474', HAIR = '#E6E1D7', PANEL = '#F7F4EE'
+const GOLD = '#A27C45', GOLD_TXT = '#7E5F2E', STONE = '#8F8778', TRACK = '#ECE7DD'
+const SERIF = "'Cormorant Garamond', serif"
+const exact: CSSProperties = { WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }
+const eyebrow: CSSProperties = { fontSize: 12, letterSpacing: '0.16em', textTransform: 'uppercase' }
+const pageStyle: CSSProperties = { width: 816, height: 1056, boxSizing: 'border-box', background: '#fff', fontFamily: 'Manrope, sans-serif', color: BODY, padding: '46px 60px 40px', display: 'flex', flexDirection: 'column', gap: 16, ...exact }
 
-function Radar({ skills, cur, prev, fill, stroke }: { skills: Skill[]; cur: Result; prev?: Result; fill: string; stroke: string }) {
-  const pctOf = (r: Result, sk: Skill) => (r.skills.find((x) => x.skill.id === sk.id)?.pct ?? 0) / 100
+function Header({ right }: { right: string }) {
   return (
-    <svg width="352" height="222" viewBox="-80 0 460 292" style={{ margin: '14px 0 6px' }} role="img" aria-label="Porcentaje logrado por habilidad">
-      <polygon points={ring(1)} fill="none" stroke="#D1D5DB" />
-      <polygon points={ring(0.5)} fill="none" stroke="#D1D5DB" strokeDasharray="3 3" />
-      {skills.map((_, i) => <line key={i} x1={C} y1={C} x2={pt(i, 1).split(',')[0]} y2={pt(i, 1).split(',')[1]} stroke="#E5E7EB" />)}
-      <polygon points={skills.map((sk, i) => pt(i, pctOf(cur, sk))).join(' ')} fill={fill} fillOpacity={0.35} stroke={stroke} strokeWidth={2} />
-      {prev && <polygon points={skills.map((sk, i) => pt(i, pctOf(prev, sk))).join(' ')} fill="none" stroke="#1B2733" strokeWidth={1.6} strokeDasharray="5 4" />}
-      {skills.map((sk, i) => {
-        const p = LABEL_POS[i]
-        const pct = `${Math.round(pctOf(cur, sk) * 100)}%`
-        return p.inline
-          ? <text key={sk.id} x={p.x} y={p.y} fontSize={15} textAnchor={p.anchor} fill="#1B2733">{sk.name} <tspan fontWeight={900}>{pct}</tspan></text>
-          : <g key={sk.id}><text x={p.x} y={p.y} fontSize={15} textAnchor={p.anchor} fill="#1B2733">{sk.name}</text><text x={p.x} y={p.y + 18} fontSize={15} fontWeight={900} textAnchor={p.anchor} fill="#1B2733">{pct}</text></g>
-      })}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ ...eyebrow, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span style={{ fontWeight: 700, color: INK }}>Informe de desarrollo motor</span>
+        <span style={{ color: MUTED }}>{right}</span>
+      </div>
+      <div style={{ height: 1, background: GOLD }} />
+    </div>
+  )
+}
+function Footer({ kid, date, page }: { kid: Kid; date: string; page: number }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderTop: `1px solid ${HAIR}`, paddingTop: 12, fontSize: 12, color: MUTED }}>
+      <span>{kid.name} · Informe de desarrollo motor · {longDate(date)}</span>
+      <span>{page} / 2</span>
+    </div>
+  )
+}
+
+// ---------- Escala de nivel general ----------
+const SEGMENTS = [15, 10, 10, 21, 10, 10, 14] // ancho proporcional de cada categoría (cociente 55–145)
+const gmqPos = (g: number) => Math.max(2, Math.min(98, ((g - 55) / 90) * 100))
+function LevelScale({ cur, prev, labels }: { cur: Result; prev?: Result; labels: [string, string] }) {
+  const active = levelIdx(cur)
+  const curX = cur.gmq !== null ? gmqPos(cur.gmq) : null
+  const prevX = prev?.gmq != null ? gmqPos(prev.gmq) : null
+  const close = curX !== null && prevX !== null && Math.abs(curX - prevX) < 9
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ position: 'relative', height: 40 }}>
+        <div style={{ position: 'absolute', left: 0, right: 0, top: 28, display: 'flex', gap: 2, height: 8 }}>
+          {SEGMENTS.map((w, i) => <div key={i} style={{ flex: `${w} 1 0`, background: i === active ? GOLD : '#E3DCCF', ...exact }} />)}
+        </div>
+        {prevX !== null && (
+          <div style={{ position: 'absolute', left: `${prevX}%`, top: 0, transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 12, color: MUTED, lineHeight: 1, whiteSpace: 'nowrap', visibility: close ? 'hidden' : 'visible' }}>{labels[0]}</span>
+            <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#fff', border: `2px solid ${STONE}` }} />
+          </div>
+        )}
+        {curX !== null && (
+          <div style={{ position: 'absolute', left: `${curX}%`, top: 0, transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: INK, lineHeight: 1, whiteSpace: 'nowrap' }}>{labels[1]}</span>
+            <div style={{ width: 14, height: 14, borderRadius: '50%', background: INK, border: '2px solid #fff', marginTop: -2, ...exact }} />
+          </div>
+        )}
+      </div>
+      <div style={{ display: 'flex', gap: 2, fontSize: 12, lineHeight: 1.3, color: MUTED, textAlign: 'center' }}>
+        {LEVELS.map((l, i) => <span key={l} style={{ flex: `${SEGMENTS[i]} 1 0`, ...(i === active ? { color: GOLD_TXT, fontWeight: 700 } : {}) }}>{l}</span>)}
+      </div>
+    </div>
+  )
+}
+
+// ---------- Tarjeta de área ----------
+function AreaCard({ title, cur, prev, sub }: { title: string; cur: Result; prev?: Result; sub: 'loc' | 'obj' }) {
+  const c = cur[sub].pct, p = prev?.[sub].pct
+  const delta = p !== undefined ? c - p : null
+  const base = p !== undefined ? Math.min(c, p) : c
+  const skills = cur.skills.filter((s) => s.skill.subtest === sub)
+  const full = skills.filter((s) => s.pct >= 100).map((s) => s.skill.name.toLowerCase())
+  const best = [...skills].sort((a, b) => b.pct - a.pct)[0]
+  const line = full.length === skills.length ? 'Domina por completo todas las habilidades del área.'
+    : full.length ? `Domina por completo ${list(full)}.`
+    : best ? `Su habilidad más lograda es ${best.skill.name.toLowerCase()} (${Math.round(best.pct)} %).` : ''
+  return (
+    <div style={{ border: `1px solid ${HAIR}`, padding: '16px 22px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <span style={{ ...eyebrow, fontWeight: 700, color: INK }}>{title}</span>
+        {p !== undefined && <span style={{ fontSize: 12, color: MUTED }}>antes {pctText(p)}</span>}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+        <span style={{ fontFamily: SERIF, fontSize: 46, fontWeight: 600, lineHeight: 1, color: INK }}>{pctText(c)}</span>
+        {delta !== null && Math.abs(delta) >= 0.05 && <span style={{ fontSize: 14, fontWeight: 700, color: delta > 0 ? GOLD_TXT : MUTED }}>{delta > 0 ? '+' : '−'}{Math.abs(delta).toFixed(1)}</span>}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'flex', height: 14, background: TRACK, ...exact }}>
+          <div style={{ width: `${base}%`, height: '100%', background: INK, ...exact }} />
+          {delta !== null && delta > 0 && <div style={{ width: `${delta}%`, height: '100%', background: GOLD, ...exact }} />}
+          {delta !== null && delta < 0 && <div style={{ width: `${-delta}%`, height: '100%', background: '#CFC8BA', ...exact }} />}
+        </div>
+      </div>
+      {line && <span style={{ fontSize: 13, lineHeight: 1.5, color: BODY }}>{line}</span>}
+    </div>
+  )
+}
+
+// ---------- Edad motora frente a edad real ----------
+const ageShort = (m: number) => { const y = Math.floor(m / 12), mm = m % 12; return mm ? `${y} a ${mm} m` : plural(y, 'año', 'años') }
+function aeInfo(ae: string | null) {
+  if (!ae) return null
+  if (ae.startsWith('>')) { const m = Math.ceil(aeToMonths(ae) / 12) * 12; return { m, label: `más de ${plural(m / 12, 'año', 'años')}`, gt: true, lt: false } }
+  if (ae.startsWith('<')) { const m = aeToMonths(ae); return { m: m - 1, label: `menos de ${ageShort(m)}`, gt: false, lt: true } }
+  const m = aeToMonths(ae); return { m, label: ageShort(m), gt: false, lt: false }
+}
+
+function AgeTimeline({ tests, overMax }: { tests: TestData[]; overMax: boolean }) {
+  const W = 696, X0 = 170, X1 = 676
+  const chrono = tests.map((t) => t.result.normMonths)
+  const rows = [
+    { label: 'Locomoción', pts: tests.map((t) => aeInfo(t.result.loc.ae)) },
+    { label: 'Control de objetos', pts: tests.map((t) => aeInfo(t.result.obj.ae)) },
+  ]
+  const values = [...chrono.filter((v): v is number => v !== null), ...rows.flatMap((r) => r.pts.filter(Boolean).map((p) => p!.m))]
+  const nowAge = chrono[chrono.length - 1]
+  if (!values.length || nowAge === null) return <div style={{ padding: 24, textAlign: 'center', color: MUTED, fontSize: 13 }}>Sin datos de edad motora (faltan las tablas o la fecha de nacimiento).</div>
+  let lo = Math.floor((Math.min(...values) - 4) / 12) * 12
+  let hi = Math.ceil((Math.max(...values) + 4) / 12) * 12
+  if (hi - lo < 36) { hi = lo + 36 }
+  lo = Math.max(0, lo)
+  const x = (m: number) => X0 + ((m - lo) / (hi - lo)) * (X1 - X0)
+  const step = (hi - lo) / 12 > 8 ? 24 : 12
+  const ticks: number[] = []
+  for (let m = lo; m <= hi; m += step) ticks.push(m)
+  const two = tests.length > 1
+  const anchorFor = (px: number): { x: number; anchor: 'start' | 'middle' | 'end' } => (px > X1 - 50 ? { x: px + 8, anchor: 'end' } : px < X0 + 20 ? { x: px - 6, anchor: 'start' } : { x: px, anchor: 'middle' })
+  const pill = overMax ? `Edad de comparación · ${ageShort(nowAge)}` : `Edad actual · ${ageShort(nowAge)}`
+  const pillW = pill.length * 6.9 + 26
+  const pillX = Math.max(0, Math.min(W - pillW, x(nowAge) - pillW / 2))
+  const rowY = [52, 98, 144]
+  const diffText = (d: number, open: boolean) => (d === 0 ? 'igual a su edad' : `${d > 0 ? '+' : '−'}${ageShort(Math.abs(d))}${open ? ' o más' : ''}`)
+
+  const Dots = ({ y, pts, gold }: { y: number; pts: ({ m: number; label: string; gt: boolean } | null)[]; gold?: boolean }) => {
+    const p0 = two ? pts[0] : null, p1 = pts[pts.length - 1]
+    return (
+      <g>
+        {p0 && p1 && <line x1={x(p0.m)} y1={y} x2={x(p1.m)} y2={y} stroke="#CFC8BA" strokeWidth={2} />}
+        {p0 && <circle cx={x(p0.m)} cy={y} r={5} fill="#fff" stroke={STONE} strokeWidth={2} />}
+        {p1 && <circle cx={x(p1.m)} cy={y} r={6.5} fill={gold ? GOLD : INK} />}
+        {p1?.gt && <path d={`M${x(p1.m) + 11} ${y - 5} L${x(p1.m) + 17} ${y} L${x(p1.m) + 11} ${y + 5}`} fill="none" stroke={INK} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />}
+        {p0 && (() => { const a = anchorFor(x(p0.m)); return <text x={a.x} y={y + 22} fontSize={12} fill={MUTED} textAnchor={a.anchor}>{p0.label}</text> })()}
+        {p1 && !gold && (() => { const a = anchorFor(x(p1.m)); return <text x={a.x} y={y - 13} fontSize={13} fontWeight={700} fill={INK} textAnchor={a.anchor}>{p1.label}</text> })()}
+      </g>
+    )
+  }
+
+  return (
+    <svg width={W} height={196} viewBox={`0 0 ${W} 196`} role="img" aria-label="Edad motora frente a edad real" style={{ display: 'block' }}>
+      <g stroke="#EEE9DF" strokeWidth={1}>{ticks.map((m) => <line key={m} x1={x(m)} y1={28} x2={x(m)} y2={172} />)}</g>
+      <line x1={X0} y1={172} x2={X1} y2={172} stroke="#B5AD9E" strokeWidth={1} />
+      <g fontFamily="Manrope, sans-serif" fontSize={12} fill={MUTED}>
+        {ticks.map((m, i) => <text key={m} x={x(m)} y={190} textAnchor={i === ticks.length - 1 ? 'end' : 'middle'}>{i === ticks.length - 1 ? `${m / 12} años` : m / 12}</text>)}
+      </g>
+      <line x1={x(nowAge)} y1={24} x2={x(nowAge)} y2={172} stroke={GOLD} strokeWidth={2} strokeDasharray="5 4" />
+      <rect x={pillX} y={1} width={pillW} height={23} rx={11.5} fill="#fff" stroke={GOLD} strokeWidth={1.5} />
+      <text x={pillX + pillW / 2} y={17} fontFamily="Manrope, sans-serif" fontSize={12} fontWeight={700} fill={GOLD_TXT} textAnchor="middle">{pill}</text>
+      <g fontFamily="Manrope, sans-serif">
+        <text x={0} y={rowY[0] - 4} fontSize={14} fontWeight={700} fill={INK}>{overMax ? 'Edad de comparación' : 'Edad real'}</text>
+        <text x={0} y={rowY[0] + 13} fontSize={12} fill={MUTED}>{two ? 'en cada test' : 'el día del test'}</text>
+        <Dots y={rowY[0]} gold pts={chrono.map((c) => (c === null ? null : { m: c, label: ageShort(c), gt: false }))} />
+        {rows.map((r, i) => {
+          const y = rowY[i + 1], last = r.pts[r.pts.length - 1]
+          return (
+            <g key={r.label}>
+              <text x={0} y={y - 4} fontSize={14} fontWeight={700} fill={INK}>{r.label}</text>
+              {last && <text x={0} y={y + 13} fontSize={12} fontWeight={700} fill={GOLD_TXT}>{diffText(last.m - nowAge, last.gt || last.lt)}</text>}
+              <Dots y={y} pts={r.pts} />
+            </g>
+          )
+        })}
+      </g>
     </svg>
   )
 }
 
-function ageDiffText(months: number) {
-  const m = Math.abs(months), y = Math.floor(m / 12), mm = m % 12
-  const parts = []
-  if (y) parts.push(`${y} ${y === 1 ? 'año' : 'años'}`)
-  if (mm) parts.push(`${mm} ${mm === 1 ? 'mes' : 'meses'}`)
-  if (!parts.length) return 'igual a su edad'
-  return `${parts.join(' ')} ${months > 0 ? 'por encima' : 'por debajo'} de su edad`
-}
-
-/** "5-6" → ["5 años", "6 meses"]; "<3-0" → ["menos de", "3 años"]; ">10-9" → ["más de", "10 años", "9 meses"] */
-function aeLines(ae: string): string[] {
-  const [y0, m0] = ae.replace(/[<>]/g, '').split('-').map(Number)
-  if (ae.startsWith('>')) {
-    // Por encima del máximo de la tabla: se redondea al año siguiente ("más de 11 años").
-    const yy = y0 + (m0 ? 1 : 0)
-    return ['más de', `${yy} años`]
-  }
-  const pre = ae.startsWith('<') ? ['menos de'] : []
-  const y = y0, m = m0
-  const out = [...pre, `${y} ${y === 1 ? 'año' : 'años'}`]
-  if (m) out.push(`${m} ${m === 1 ? 'mes' : 'meses'}`)
-  return out
-}
-
-function AgeChart({ tests, sub, light, strong }: { tests: TestData[]; sub: 'loc' | 'obj'; light: string; strong: string }) {
-  const items = tests.map((t, i) => {
-    const ae = t.result[sub].ae
-    const chrono = t.result.normMonths
-    if (!ae || chrono === null) return null
-    const aeM = ae.startsWith('<') ? aeToMonths(ae) - 1 : ae.startsWith('>') ? Math.ceil(aeToMonths(ae) / 12) * 12 : aeToMonths(ae)
-    return { gt: ae.startsWith('>'), lines: aeLines(ae), diff: aeM - chrono, color: i === tests.length - 1 ? strong : light, ink: i === tests.length - 1 && sub === 'obj' ? '#fff' : '#1B2733' }
-  })
-  const valid = items.filter(Boolean) as NonNullable<(typeof items)[number]>[]
-  if (!valid.length) return <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#5A6B7B', fontSize: 13 }}>Sin datos de edad equivalente</div>
-  let lo = Math.min(0, Math.floor(Math.min(...valid.map((v) => v.diff)) / 12))
-  let hi = Math.max(0, Math.ceil(Math.max(...valid.map((v) => v.diff)) / 12))
-  if (hi - lo < 2) { if (hi === 0) lo = Math.min(lo, -2); else hi = Math.max(hi, 2) }
-  // Espacio reservado (en px) arriba y abajo para las etiquetas "5 años / 6 meses".
-  const maxLines = (pos: boolean) => Math.max(0, ...valid.filter((v) => (v.diff >= 0) === pos).map((v) => v.lines.length))
-  const padTop = maxLines(true) ? maxLines(true) * 16 + 8 : 8
-  const padBottom = maxLines(false) ? maxLines(false) * 16 + 8 : 8
-  const total = 200, H = total - padTop - padBottom, ppy = H / (hi - lo), zeroY = padTop + hi * ppy
-  const ticks = Array.from({ length: hi - lo + 1 }, (_, i) => hi - i)
-  const last = valid[valid.length - 1]
+// ---------- Página 1: resumen ----------
+function PageSummary({ kid, tests, n }: { kid: Kid; tests: TestData[]; n: number }) {
+  const cur = tests[tests.length - 1], prev = tests.length > 1 ? tests[0] : undefined
+  const r = cur.result, a = r.age
+  const name = kid.name.split(' ')[0]
+  const labels: [string, string] = !prev ? ['', 'Resultado'] : n <= 2 ? ['1.er test', '2.º test'] : ['Anterior', 'Actual']
+  const prefs = preferences(kid)
+  const folder = kid.folderId ? folderLabel(kid.folderId) : ''
+  const evaluator = evaluatorName()
+  let change = `Este informe es su punto de partida: servirá para medir su progreso en las próximas evaluaciones.`
+  if (prev?.result.rating && r.rating) {
+    const d = levelIdx(r) - levelIdx(prev.result)
+    change = d > 0 ? `Desde su evaluación anterior avanzó ${d === 1 ? 'un nivel' : `${d} niveles`}: de «${prev.result.rating.es}» a «${r.rating.es}».`
+      : d === 0 ? `Se mantiene en el nivel «${r.rating.es}» respecto a su evaluación anterior.`
+      : `Respecto a su evaluación anterior pasó de «${prev.result.rating.es}» a «${r.rating.es}».`
+  } else if (prev) change = 'Su progreso respecto a la evaluación anterior se detalla en las áreas y en la segunda página.'
+  const facts: [string, string][] = [
+    ['Edad', a ? `${plural(a.years, 'año', 'años')}, ${plural(a.months, 'mes', 'meses')}, ${plural(a.days, 'día', 'días')}` : '—'],
+    ['Evaluación', longDate(cur.date)],
+    ...(prev ? [['Anterior', longDate(prev.date)] as [string, string]] : []),
+    ...(folder ? [['Grupo', folder] as [string, string]] : []),
+    ...(evaluator ? [['Evaluador', evaluator] as [string, string]] : []),
+  ]
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <div style={{ display: 'flex', gap: 8 }}>
-        <div style={{ position: 'relative', width: 24, height: total, fontSize: 11, color: '#6B7280', textAlign: 'right' }}>
-          {ticks.map((t) => <span key={t} style={{ position: 'absolute', right: 0, top: padTop + (hi - t) * ppy - 6 }}>{t > 0 ? `+${t}` : t}</span>)}
+    <div className="report-page" style={pageStyle}>
+      <Header right={evalTitle(n)} />
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 28 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
+          <span style={{ fontFamily: SERIF, fontSize: kid.name.length > 22 ? 42 : 52, fontWeight: 600, lineHeight: 1, color: INK }}>{kid.name}</span>
+          {kid.birthDate && <span style={{ fontSize: 14 }}><span style={{ color: MUTED }}>Fecha de nacimiento</span>  ·  {longDate(kid.birthDate)}</span>}
+          {prefs && <span style={{ fontSize: 14 }}><span style={{ color: MUTED }}>Preferencias</span>  ·  {prefs}</span>}
         </div>
-        <div style={{ flex: 1, position: 'relative', height: total }}>
-          {ticks.map((t) => <div key={t} style={{ position: 'absolute', left: 0, right: 0, top: padTop + (hi - t) * ppy, borderTop: '1px dashed #E5E7EB' }} />)}
-          {items.map((it, i) => {
-            if (!it) return null
-            const h = Math.max(2, (Math.abs(it.diff) / 12) * ppy)
-            const top = it.diff >= 0 ? zeroY - h : zeroY
-            const left = 30 + i * 88
-            return (
-              <div key={i}>
-                <div style={{ position: 'absolute', left, width: 72, top, height: h, background: it.color, WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }} />
-                <div style={{ position: 'absolute', left: left - 8, width: 88, textAlign: 'center', fontSize: 13, lineHeight: '16px', fontWeight: 900, top: it.diff >= 0 ? top - it.lines.length * 16 - 4 : top + h + 3 }}>
-                  {it.lines.map((l) => <div key={l}>{l}</div>)}
-                </div>
-              </div>
-            )
-          })}
-          <div style={{ position: 'absolute', left: 0, right: 0, top: zeroY - 2, height: 4, background: '#0A6FA8' }} />
-          <div style={{ position: 'absolute', right: 0, top: lo === 0 ? zeroY - 20 : zeroY + 6, fontSize: 12, fontWeight: 900, color: '#0A6FA8' }}>Edad cronológica</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'auto auto', columnGap: 14, rowGap: 5, fontSize: 12, whiteSpace: 'nowrap', flex: 'none' }}>
+          {facts.map(([k, v]) => [<span key={k} style={{ color: MUTED }}>{k}</span>, <span key={k + 'v'} style={{ fontWeight: 600, color: INK, textAlign: 'right' }}>{v}</span>])}
         </div>
       </div>
-      <div style={{ fontSize: 13, color: '#33414E' }}>{tests.length > 1 ? '2° test' : 'Test'}: <strong>{last.gt ? 'más de ' : ''}{ageDiffText(last.diff)}</strong></div>
+
+      <div style={{ background: PANEL, padding: '22px 28px 18px', display: 'flex', flexDirection: 'column', gap: 16, ...exact }}>
+        <div style={{ display: 'flex', gap: 34, alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 'none', minWidth: 180 }}>
+            <span style={{ ...eyebrow, color: MUTED }}>Nivel general</span>
+            <span style={{ fontFamily: SERIF, fontSize: 38, fontWeight: 600, lineHeight: 1.05, color: INK, whiteSpace: 'nowrap' }}>{r.rating?.es ?? '—'}</span>
+          </div>
+          <div style={{ width: 1, alignSelf: 'stretch', background: '#DCD5C7' }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 14, lineHeight: 1.5 }}>
+            {r.rating
+              ? <span>{name} tiene un desarrollo motor <strong style={{ color: INK }}>{expectation(r)}</strong> para su edad.</span>
+              : <span>No se pudo calcular el nivel general: revisa la fecha de nacimiento, el sexo y las tablas en Ajustes.</span>}
+            <span>{change}</span>
+          </div>
+        </div>
+        {r.gmq !== null && <LevelScale cur={r} prev={prev?.result} labels={labels} />}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 20 }}>
+          <AreaCard title="Locomoción" sub="loc" cur={r} prev={prev?.result} />
+          <AreaCard title="Control de objetos" sub="obj" cur={r} prev={prev?.result} />
+        </div>
+        {prev && (
+          <div style={{ display: 'flex', gap: 20, fontSize: 12, color: MUTED }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 14, height: 8, background: INK, ...exact }} />Nivel del {labels[0].toLowerCase()}</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 14, height: 8, background: GOLD, ...exact }} />Avance en el {labels[1].toLowerCase()}</span>
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 16 }}>
+          <span style={{ fontFamily: SERIF, fontSize: 26, fontWeight: 600, color: INK, lineHeight: 1.1 }}>Edad motora frente a edad real</span>
+          {prev && (
+            <div style={{ display: 'flex', gap: 16, fontSize: 12, color: MUTED, alignItems: 'center', whiteSpace: 'nowrap' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 8, height: 8, borderRadius: '50%', border: `2px solid ${STONE}`, background: '#fff' }} />{labels[0]}</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 11, height: 11, borderRadius: '50%', background: INK, ...exact }} />{labels[1]}</span>
+            </div>
+          )}
+        </div>
+        <AgeTimeline tests={tests} overMax={r.overMax} />
+        <span style={{ fontSize: 13, lineHeight: 1.5 }}>
+          {r.overMax
+            ? <>Mayor de 10 años: se compara con la edad máxima de las normas (10 años 11 meses).</>
+            : <>La línea dorada es su edad de hoy: a la derecha, niños <strong style={{ color: INK }}>mayores</strong>; a la izquierda, menores.</>}
+        </span>
+      </div>
+
+      <div style={{ marginTop: 'auto' }}><Footer kid={kid} date={cur.date} page={1} /></div>
     </div>
   )
 }
 
-function Bar({ pct, prev, color }: { pct: number; prev?: number; color: string }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-      <div style={{ flex: 1, height: 18, background: '#E5E7EB', borderRadius: 9, position: 'relative', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 9 }} />
-        {prev !== undefined && <div style={{ position: 'absolute', left: `${prev}%`, top: -4, width: 3, height: 26, background: '#1B2733' }} />}
-      </div>
-      <span style={{ fontSize: 18, fontWeight: 900 }}>{pct.toFixed(1)}%</span>
-    </div>
-  )
-}
-
-// ---------- Informe de una página ----------
-export function ReportPage({ kid, tests, sessionId, editable }: { kid: Kid; tests: TestData[]; sessionId: string; editable: boolean }) {
-  const cur = tests[tests.length - 1]
-  const prev = tests.length > 1 ? tests[0] : undefined
+// ---------- Página 2: detalle ----------
+function PageDetail({ kid, tests, sessionId, editable, n }: { kid: Kid; tests: TestData[]; sessionId: string; editable: boolean; n: number }) {
+  const cur = tests[tests.length - 1], prev = tests.length > 1 ? tests[0] : undefined
   const r = cur.result
   const [conc, setConc] = useState(cur.score?.conclusions ?? '')
   const [sugg, setSugg] = useState(cur.score?.suggestions ?? '')
   useEffect(() => { setConc(cur.score?.conclusions ?? ''); setSugg(cur.score?.suggestions ?? '') }, [cur.score?.conclusions, cur.score?.suggestions])
   const save = (patch: { conclusions?: string; suggestions?: string }) => setReportText(sessionId, kid.id, patch)
-  const loc = SKILLS.filter((s) => s.subtest === 'loc'), obj = SKILLS.filter((s) => s.subtest === 'obj')
-  const a = r.age
-  const box = { padding: '10px 16px', fontSize: 13.5, lineHeight: 1.4, minHeight: 90, whiteSpace: 'pre-wrap' as const }
-  const area = { ...box, width: '100%', border: 'none', resize: 'vertical' as const, fontFamily: 'inherit', background: '#FFFBEB', boxSizing: 'border-box' as const }
+  const labels = n <= 2 ? ['1.er test', '2.º test'] : ['Anterior', 'Actual']
+  const evaluator = evaluatorName()
+  const paras = conc.split('\n').map((s) => s.trim()).filter(Boolean)
+  const recs = sugg.split('\n').map((s) => s.trim()).filter(Boolean)
+  const area: CSSProperties = { width: '100%', boxSizing: 'border-box', border: '1px dashed #D9C9A8', background: '#FFFBEB', fontFamily: 'inherit', fontSize: 13.5, lineHeight: 1.55, padding: '8px 10px', resize: 'vertical', color: BODY }
+  const subTitle: CSSProperties = { fontFamily: SERIF, fontSize: 26, fontWeight: 600, color: INK, lineHeight: 1.1 }
+
+  const SkillRow = ({ id }: { id: string }) => {
+    const s = r.skills.find((x) => x.skill.id === id)!
+    const p = prev?.result.skills.find((x) => x.skill.id === id)?.pct
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: INK }}>{s.skill.name}</span>
+          <span style={{ fontSize: 12, color: MUTED }}>
+            {p !== undefined && (Math.round(p) === Math.round(s.pct) ? 'se mantiene · ' : `antes ${Math.round(p)} % · `)}
+            <strong style={{ fontSize: 14, color: INK }}>{Math.round(s.pct)} %</strong>
+          </span>
+        </div>
+        <div style={{ position: 'relative', height: 5, background: TRACK, ...exact }}>
+          <div style={{ width: `${s.pct}%`, height: '100%', background: INK, ...exact }} />
+          {p !== undefined && <div style={{ position: 'absolute', left: `${p}%`, marginLeft: p >= 99 ? -2 : -1, top: -4, width: 2, height: 13, background: STONE, ...exact }} />}
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="report-page" style={{ width: 816, height: 1056, boxSizing: 'border-box', background: '#fff', fontFamily: 'Lato, sans-serif', color: '#1B2733', padding: '28px 40px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 900, color: '#0A6FA8' }}>
-        <span>INFORME DE DESARROLLO MOTOR</span>
-        <span style={{ fontWeight: 400 }}>{prev ? `1° Test: ${longDate(prev.date)} · 2° Test: ${longDate(cur.date)}` : `Fecha Test: ${longDate(cur.date)}`}</span>
+    <div className="report-page" style={pageStyle}>
+      <Header right="Detalle por habilidad" />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 24 }}>
+        <span style={{ fontFamily: SERIF, fontSize: 38, fontWeight: 600, lineHeight: 1, color: INK }}>Habilidad por habilidad</span>
+        {prev && (
+          <div style={{ display: 'flex', gap: 16, fontSize: 12, color: MUTED, alignItems: 'center', whiteSpace: 'nowrap' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 2, height: 12, background: STONE, ...exact }} />{labels[0]}</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 16, height: 5, background: INK, ...exact }} />{labels[1]}</span>
+          </div>
+        )}
       </div>
-      <div style={{ background: '#0A6FA8', color: '#fff', borderRadius: 14, padding: '16px 22px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 44, marginTop: -6 }}>
+        {(['loc', 'obj'] as const).map((sub) => (
+          <div key={sub} style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
+            <span style={{ ...eyebrow, fontWeight: 700, color: INK, paddingBottom: 8, borderBottom: `1px solid ${HAIR}` }}>{sub === 'loc' ? 'Locomoción' : 'Control de objetos'}</span>
+            {SKILLS.filter((s) => s.subtest === sub).map((s) => <SkillRow key={s.id} id={s.id} />)}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 44, marginTop: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <span style={subTitle}>Conclusiones</span>
+          {editable && <textarea className="screen-only" aria-label="Conclusiones" value={conc} rows={7} placeholder="Escribe aquí o usa “Sugerir texto”. Cada línea es un párrafo." onChange={(e) => setConc(e.target.value)} onBlur={() => save({ conclusions: conc })} style={area} />}
+          <div className={editable ? 'print-only' : ''}>
+            {paras.map((t, i) => <p key={i} style={{ margin: '0 0 10px', fontSize: 14, lineHeight: 1.65 }}>{t}</p>)}
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <span style={subTitle}>Recomendaciones</span>
+          {editable && <textarea className="screen-only" aria-label="Recomendaciones" value={sugg} rows={7} placeholder="Una recomendación por línea, o usa “Sugerir texto”." onChange={(e) => setSugg(e.target.value)} onBlur={() => save({ suggestions: sugg })} style={area} />}
+          <div className={editable ? 'print-only' : ''}>
+            {recs.length > 1
+              ? recs.map((t, i) => (
+                <div key={i} style={{ display: 'flex', gap: 12, fontSize: 14, lineHeight: 1.6, marginBottom: 10 }}>
+                  <span style={{ fontFamily: SERIF, fontSize: 20, fontWeight: 600, color: GOLD, lineHeight: 1.1, flex: 'none', width: 14 }}>{i + 1}</span>
+                  <span>{t}</span>
+                </div>
+              ))
+              : recs.map((t, i) => <p key={i} style={{ margin: '0 0 10px', fontSize: 14, lineHeight: 1.65 }}>{t}</p>)}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 32, marginTop: 12 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ fontSize: 30, fontWeight: 900 }}>{kid.name}</span>
-          <span style={{ fontSize: 17 }}>Edad: {a ? `${a.years} ${a.years === 1 ? 'año' : 'años'}, ${a.months} ${a.months === 1 ? 'mes' : 'meses'}, ${a.days} ${a.days === 1 ? 'día' : 'días'}` : '—'}</span>
+          <span style={{ ...eyebrow, color: MUTED }}>Próxima evaluación recomendada</span>
+          <span style={{ fontFamily: SERIF, fontSize: 24, fontWeight: 600, color: INK, lineHeight: 1.1 }}>{longDate(addMonths(cur.date, 3))}</span>
         </div>
-        {r.overMax && <span style={{ fontSize: 12, background: 'rgba(255,255,255,.18)', padding: '6px 10px', borderRadius: 8 }}>Calculado con normas de 10 años 11 meses</span>}
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 32 }}>
-        {([['LOCOMOCIÓN', 'loc', loc, '#F2A541', '#E08E1B', '#C77A12'], ['CONTROL DE OBJETOS', 'obj', obj, '#0E8F72', '#0B7A61', '#0B7A61']] as const).map(([title, k, sks, fill, stroke, ink]) => (
-          <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ fontSize: 20, fontWeight: 900, color: ink }}>{title}</div>
-            <Bar pct={r[k].pct} prev={prev?.result[k].pct} color={fill} />
-            {prev && <div style={{ fontSize: 12, color: '#5A6B7B' }}>Línea negra y contorno punteado = 1° test ({prev.result[k].pct.toFixed(1)}%)</div>}
-            <Radar skills={[...sks]} cur={r} prev={prev?.result} fill={fill} stroke={stroke} />
-          </div>
-        ))}
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <span style={{ fontSize: 16, fontWeight: 900, color: '#0A6FA8' }}>Edad motora vs. edad cronológica</span>
-          <span style={{ fontSize: 12, color: '#5A6B7B' }}>Cada línea = 1 año{prev ? ' · claro = 1° test · fuerte = 2° test' : ''}</span>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 32 }}>
-          <AgeChart tests={tests} sub="loc" light="#FBDDB2" strong="#F2A541" />
-          <AgeChart tests={tests} sub="obj" light="#B5E3D6" strong="#0E8F72" />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: 250, textAlign: 'center' }}>
+          <div style={{ height: 28, borderBottom: `1px solid ${STONE}` }} />
+          <span style={{ fontSize: 13, fontWeight: 600, color: INK }}>{evaluator || ' '}</span>
+          <span style={{ fontSize: 12, color: MUTED }}>Evaluador</span>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', border: '2px solid #0A6FA8', borderRadius: 14, overflow: 'hidden', marginTop: 16 }}>
-        {([['Conclusiones', conc, setConc, 'conclusions'], ['Sugerencias', sugg, setSugg, 'suggestions']] as const).map(([title, val, setVal, key], i) => (
-          <div key={key} style={{ display: 'flex', flexDirection: 'column', borderRight: i === 0 ? '2px solid #0A6FA8' : 'none' }}>
-            <div style={{ background: '#0A6FA8', color: '#fff', fontSize: 16, fontWeight: 900, padding: '8px 16px', WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}>{title}</div>
-            {editable && <textarea className="screen-only" aria-label={title} value={val} placeholder="Escribe aquí o usa “Sugerir texto”" onChange={(e) => setVal(e.target.value)} onBlur={() => save({ [key]: val })} style={area} rows={5} />}
-            <div className={editable ? 'print-only' : ''} style={box}>{val}</div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ fontSize: 11, lineHeight: 1.45, color: '#33414E', fontStyle: 'italic', marginTop: 'auto' }}>
-        <strong>NOTA LEGAL:</strong> Este informe corresponde a una evaluación del desarrollo motor con fines educativos y orientativos. <strong>No constituye un diagnóstico médico.</strong> Los resultados reflejan el desempeño del niño al momento de la evaluación y pueden variar con la práctica, la maduración y el contexto. Para evaluaciones clínicas o diagnósticos específicos, se recomienda acudir a un profesional de la salud especializado.
+      <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: MUTED }}>
+          <strong style={{ color: BODY }}>Nota.</strong> Evaluación del desarrollo motor con fines educativos y orientativos; no constituye un diagnóstico médico. Los resultados reflejan el desempeño del día de la evaluación y pueden variar con la práctica y la maduración. Para una evaluación clínica, consulte a un profesional de la salud.
+        </p>
+        <Footer kid={kid} date={cur.date} page={2} />
       </div>
     </div>
+  )
+}
+
+/** Informe completo de un niño: 2 páginas tamaño carta. */
+export function ReportPages({ kid, tests, sessionId, editable, n }: { kid: Kid; tests: TestData[]; sessionId: string; editable: boolean; n: number }) {
+  return (
+    <>
+      <PageSummary kid={kid} tests={tests} n={n} />
+      <PageDetail kid={kid} tests={tests} sessionId={sessionId} editable={editable} n={n} />
+    </>
   )
 }
 
@@ -251,19 +484,24 @@ export function ReportScreen() {
   }, [])
   const s = sessions.find((x) => x.id === id)
   if (!s) return <div className="empty">Esta sesión ya no existe.</div>
-  const list = (kidId ? [kids.find((k) => k.id === kidId)] : s.kidIds.map((k) => kids.find((x) => x.id === k))).filter(Boolean) as Kid[]
+  const kidList = (kidId ? [kids.find((k) => k.id === kidId)] : s.kidIds.map((k) => kids.find((x) => x.id === k))).filter(Boolean) as Kid[]
 
   const suggest = () => {
-    list.forEach((k) => {
+    const single = kidList.length === 1
+    if (single) {
+      const t = kidTests(kidList[0], s, sessions, scores, norms), cur = t[t.length - 1]
+      if ((cur.score?.conclusions || cur.score?.suggestions) && !window.confirm('¿Reemplazar las conclusiones y recomendaciones que ya escribiste por un texto sugerido?')) return
+    }
+    kidList.forEach((k) => {
       const t = kidTests(k, s, sessions, scores, norms)
-      const cur = t[t.length - 1]
-      if (!cur.score?.conclusions && !cur.score?.suggestions || list.length === 1) setReportText(s.id, k.id, draftTexts(k, cur))
+      const cur = t[t.length - 1], prev = t.length > 1 ? t[0] : undefined
+      if (single || (!cur.score?.conclusions && !cur.score?.suggestions)) setReportText(s.id, k.id, draftTexts(k, cur, prev))
     })
   }
   const excel = async () => {
     setBusy(true)
     try {
-      const ok = await exportFoldersOf(list)
+      const ok = await exportFoldersOf(kidList)
       if (!ok) alert('Todavía no hay niños puntuados para exportar.')
     } finally { setBusy(false) }
   }
@@ -273,20 +511,20 @@ export function ReportScreen() {
     <div style={{ background: '#E3EAF0', minHeight: '100%' }}>
       <div className="no-print" style={{ position: 'sticky', top: 0, zIndex: 5, background: '#fff', borderBottom: '1px solid #E3EAF0', padding: 'calc(10px + env(safe-area-inset-top)) 10px 10px', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <button className="icon-btn light" aria-label="Volver" onClick={() => nav(kidId ? `/sesion/${s.id}/resultados/${kidId}` : `/sesion/${s.id}/resultados`)}>✕</button>
-        <span style={{ flex: 1, fontWeight: 900, fontSize: 16, minWidth: 120 }}>{kidId ? 'Informe gráfico' : `Informes del grupo (${list.length})`}</span>
+        <span style={{ flex: 1, fontWeight: 900, fontSize: 16, minWidth: 120 }}>{kidId ? 'Informe gráfico' : `Informes del grupo (${kidList.length})`}</span>
         <button style={{ ...btn, background: '#F4F7FA', color: '#1B2733' }} onClick={suggest}>Sugerir texto</button>
-        <button style={{ ...btn, background: '#0B7A61', color: '#fff' }} disabled={busy} onClick={excel}>{busy ? 'Generando…' : `Excel de ${[...new Set(list.map((k) => folderLabel(k.folderId)))].join(' + ')}`}</button>
+        <button style={{ ...btn, background: '#0B7A61', color: '#fff' }} disabled={busy} onClick={excel}>{busy ? 'Generando…' : `Excel de ${[...new Set(kidList.map((k) => folderLabel(k.folderId)))].join(' + ')}`}</button>
         <button style={{ ...btn, background: '#0A6FA8', color: '#fff' }} onClick={() => window.print()}>PDF / Imprimir</button>
       </div>
       <div className="no-print" style={{ padding: '8px 12px', fontSize: 13, color: '#33414E' }}>
-        Toca “Sugerir texto” para un borrador de conclusiones y sugerencias, y edítalo en los recuadros amarillos. Para el PDF, elige “Guardar como PDF” en la ventana de impresión.
+        Cada informe tiene 2 páginas. Toca “Sugerir texto” para un borrador de conclusiones y recomendaciones, y edítalo en los recuadros amarillos de la página 2. Para el PDF, elige “Guardar como PDF” en la ventana de impresión.
       </div>
       <div className="report-wrap" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '8px 8px 24px' }}>
-        {list.map((k) => {
+        {kidList.map((k) => {
           const t = kidTests(k, s, sessions, scores, norms)
           return (
-            <div key={k.id} className="report-scale" style={{ zoom: scale }}>
-              <ReportPage kid={k} tests={t} sessionId={s.id} editable />
+            <div key={k.id} className="report-scale" style={{ zoom: scale, display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <ReportPages kid={k} tests={t} sessionId={s.id} editable n={evalNumber(k, s, sessions, scores)} />
             </div>
           )
         })}
