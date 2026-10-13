@@ -36,7 +36,7 @@ export function FolderList() {
     <>
       <Top title="Carpetas" sub={`${folders.length} ${folders.length === 1 ? 'carpeta' : 'carpetas'} · ${plural(kids.length)}`} />
       <main className="content">
-        {folders.length === 0 && <div className="banner info">Crea una carpeta por cliente o grupo (por ejemplo, "Olimpic") para tener a los niños ordenados.</div>}
+        {folders.length === 0 && <div className="banner info">Crea una carpeta por cliente o grupo (por ejemplo, un colegio o un club) para tener a los niños ordenados.</div>}
         {folders.map((f) => {
           const n = kids.filter((k) => k.folderId === f.id).length
           return (
@@ -60,7 +60,7 @@ export function FolderList() {
         <Sheet title="Nueva carpeta" onClose={() => setCreating(false)}>
           <div className="field">
             <label htmlFor="fname">Nombre de la carpeta</label>
-            <input id="fname" className="input" autoFocus placeholder="Ej. Olimpic" value={name}
+            <input id="fname" className="input" autoFocus placeholder="Ej. Nombre del colegio, club o grupo" value={name}
               onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && create()} />
           </div>
           <button className="btn primary" onClick={create}>Crear</button>
