@@ -6,8 +6,8 @@ import { useStore } from './store'
 import { SKILLS, skillById, type Skill } from './skills'
 import { Top } from './ui'
 import { dateText } from './sessions'
-import { JOINTS, Figure, NEAR, FAR, FIGURE_OPACITY, VISUAL_SKILLS, dragJoint, phaseName, phasesOf, startPose, transformPose, type Joint, type Pose } from './pose'
-import { deletePhoto, getPhoto, photoId, saveNote, setPhotoPose, useBlobUrl, useKidVisual, type KidVisual, type Photo, type SkillNote } from './photos'
+import { JOINTS, Figure, COLORS, FIGURE_OPACITY, lastColor, rememberColor, type FigureColor, VISUAL_SKILLS, dragJoint, phaseName, phasesOf, startPose, transformPose, type Joint, type Pose } from './pose'
+import { deletePhoto, getPhoto, photoId, saveNote, updatePhoto, useBlobUrl, useKidVisual, type KidVisual, type Photo, type SkillNote } from './photos'
 
 export const MAX_VISUAL_SKILLS = 4
 
@@ -19,7 +19,7 @@ export function PhotoView({ photo, width, height, pose, bg = '#0F1720' }: { phot
   return (
     <svg width={width} height={height} viewBox={`0 0 1000 ${H}`} preserveAspectRatio="xMidYMid meet" style={{ display: 'block', background: bg }} role="img" aria-label={phaseName(photo.skillId, photo.phase)}>
       {url && <image href={url} x={0} y={0} width={1000} height={H} />}
-      {p && <Figure pose={p} />}
+      {p && <Figure pose={p} color={photo.color} />}
     </svg>
   )
 }
@@ -131,6 +131,7 @@ export function PoseEditor() {
   const [photo, setPhoto] = useState<Photo | null | undefined>(undefined)
   const [pose, setPose] = useState<Pose | null>(null)
   const [active, setActive] = useState<Joint | null>(null)
+  const [color, setColor] = useState<FigureColor>('dorado')
   const svgRef = useRef<SVGSVGElement>(null)
   const dragging = useRef<Joint | null>(null)
   const back = `/sesion/${id}/registro/${kidId}`
@@ -144,15 +145,17 @@ export function PoseEditor() {
       if (p.pose === undefined) {
         // El muñeco empieza mirando a la derecha; si el niño va hacia el otro lado se usa "Voltear".
         const start = startPose(skillId, phase, p.w, p.h)
-        setPose(start)
-        setPhotoPose(p.id, start)
-      } else setPose(p.pose)
+        const c = p.color ?? lastColor()
+        setPose(start); setColor(c)
+        updatePhoto(p.id, { pose: start, color: c })
+      } else { setPose(p.pose); setColor(p.color ?? 'dorado') }
     }).catch(() => { if (alive) setPhoto(null) })
     return () => { alive = false }
   }, [id, kidId, skillId, phase])
 
   const H = photo ? (1000 * photo.h) / photo.w : 1000
-  const save = (p: Pose | null) => { setPose(p); if (photo) setPhotoPose(photo.id, p) }
+  const save = (p: Pose | null) => { setPose(p); if (photo) updatePhoto(photo.id, { pose: p }) }
+  const pickColor = (c: FigureColor) => { setColor(c); rememberColor(c); if (photo) updatePhoto(photo.id, { color: c }) }
   const toSvg = (e: { clientX: number; clientY: number }): [number, number] | null => {
     const el = svgRef.current, m = el?.getScreenCTM()
     if (!el || !m) return null
@@ -210,7 +213,7 @@ export function PoseEditor() {
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
           style={{ width: '100%', maxHeight: '62vh', touchAction: 'none', display: 'block' }} role="img" aria-label="Foto con el muñeco">
           <PhotoImage photo={photo} H={H} />
-          {pose && <Figure pose={pose} active={active} editing />}
+          {pose && <Figure pose={pose} active={active} editing color={color} />}
         </svg>
       </div>
 
@@ -226,6 +229,17 @@ export function PoseEditor() {
               <button style={tool} aria-label="Girar a la izquierda" onClick={() => op({ rotate: -5 })}>⟲</button>
               <button style={tool} aria-label="Girar a la derecha" onClick={() => op({ rotate: 5 })}>⟳</button>
               <button style={tool} onClick={() => op({ flip: true })}>⇋ Voltear</button>
+            </div>
+            <div role="radiogroup" aria-label="Color del muñeco" style={{ display: 'flex', gap: 6 }}>
+              {(Object.keys(COLORS) as FigureColor[]).map((c) => (
+                <button key={c} role="radio" aria-checked={color === c} onClick={() => pickColor(c)}
+                  style={{ ...tool, flex: 1, ...(color === c ? { border: '2px solid #0A6FA8', background: '#E6F1F8' } : {}) }}>
+                  <span aria-hidden="true" style={{ width: 18, height: 18, borderRadius: 9, background: COLORS[c].near, flex: 'none' }} />
+                  <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.1 }}>
+                    {COLORS[c].label}<span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>{COLORS[c].hint}</span>
+                  </span>
+                </button>
+              ))}
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
               <button style={{ ...tool, flex: 1 }} onClick={() => {
@@ -243,8 +257,8 @@ export function PoseEditor() {
           <button style={{ ...tool, width: '100%' }} onClick={() => save(startPose(skillId, phase, photo.w, photo.h))}>Poner muñeco</button>
         )}
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'var(--muted)' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 16, height: 3, borderRadius: 2, background: NEAR, opacity: FIGURE_OPACITY }} />Lado cercano</span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 16, height: 3, borderRadius: 2, background: FAR, opacity: FIGURE_OPACITY }} />Lado lejano</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 16, height: 3, borderRadius: 2, background: COLORS[color].near, opacity: FIGURE_OPACITY }} />Lado cercano</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 16, height: 3, borderRadius: 2, background: COLORS[color].far, opacity: FIGURE_OPACITY }} />Lado lejano</span>
           <button onClick={async () => { if (window.confirm('¿Borrar esta foto del registro visual?')) { await deletePhoto(photo.id); nav(back) } }}
             style={{ marginLeft: 'auto', border: 'none', background: 'none', color: '#C2410C', fontSize: 13, fontWeight: 900, height: 40 }}>Borrar foto</button>
         </div>
@@ -272,10 +286,12 @@ export function VisualPageBody({ rows, styles }: { rows: VisualRow[]; styles: { 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 24 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <span style={{ fontFamily: SERIF, fontSize: 38, fontWeight: 600, lineHeight: 1, color: INK }}>{VISUAL_TITLE}</span>
-          <span style={{ fontSize: 13, lineHeight: 1.5 }}>Fotos tomadas durante la evaluación, fase por fase. La figura dorada muestra la postura de referencia de cada fase.</span>
+          <span style={{ fontSize: 13, lineHeight: 1.5 }}>Fotos tomadas durante la evaluación, fase por fase. La figura superpuesta muestra la postura de referencia de cada fase.</span>
         </div>
         <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: MUTED, whiteSpace: 'nowrap' }}>
-          <svg width="22" height="10" aria-hidden="true"><line x1="2" y1="5" x2="20" y2="5" stroke={NEAR} strokeOpacity={FIGURE_OPACITY} strokeWidth="3" strokeLinecap="round" /></svg>
+          {[...new Set(rows.flatMap((r) => r.photos.filter((p) => p.pose).map((p) => p.color ?? 'dorado')))].map((c) => (
+            <svg key={c} width="22" height="10" aria-hidden="true"><line x1="2" y1="5" x2="20" y2="5" stroke={COLORS[c].near} strokeOpacity={FIGURE_OPACITY} strokeWidth="3" strokeLinecap="round" /></svg>
+          ))}
           Postura de referencia
         </span>
       </div>

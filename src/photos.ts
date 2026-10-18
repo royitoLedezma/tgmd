@@ -1,7 +1,7 @@
 // Fotos del registro visual (página 3 del informe): se guardan SOLO en este celular (IndexedDB), nunca en la nube.
 // Cada foto ocupa un casillero: sesión · niño · habilidad · fase. Junto a la foto se guarda la postura del muñeco.
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import type { Pose } from './pose'
+import type { FigureColor, Pose } from './pose'
 
 export interface Photo {
   id: string // sesion|niño|habilidad|fase
@@ -15,6 +15,8 @@ export interface Photo {
   h: number
   /** Muñeco sobre la foto. undefined = todavía no se acomodó; null = la foto va sin muñeco. */
   pose?: Pose | null
+  /** Color del muñeco (dorado si no se eligió). */
+  color?: FigureColor
   createdAt: number
 }
 
@@ -64,10 +66,10 @@ export async function savePhoto(p: Omit<Photo, 'id' | 'sk' | 'createdAt'>) {
   changed()
 }
 
-export async function setPhotoPose(id: string, pose: Pose | null) {
+export async function updatePhoto(id: string, patch: Partial<Pick<Photo, 'pose' | 'color'>>) {
   const cur = await tx<Photo | undefined>(['photos'], 'readonly', (t) => t.objectStore('photos').get(id))
   if (!cur) return
-  await tx(['photos'], 'readwrite', (t) => { t.objectStore('photos').put({ ...cur, pose }) })
+  await tx(['photos'], 'readwrite', (t) => { t.objectStore('photos').put({ ...cur, ...patch }) })
   changed()
 }
 

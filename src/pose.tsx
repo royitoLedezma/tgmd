@@ -134,14 +134,26 @@ export function transformPose(pose: Pose, op: { rotate?: number; scale?: number;
 }
 
 // ---------- Dibujo ----------
-export const NEAR = '#F2B33D', FAR = '#D9822B'
+/** Dos colores a elección: dorado para ropa oscura, azul para ropa clara. */
+export type FigureColor = 'dorado' | 'azul'
+export const COLORS: Record<FigureColor, { near: string; far: string; label: string; hint: string }> = {
+  dorado: { near: '#F2B33D', far: '#D9822B', label: 'Dorado', hint: 'ropa oscura' },
+  azul: { near: '#1E5FD8', far: '#0F2F7A', label: 'Azul', hint: 'ropa clara' },
+}
+const LAST_COLOR = 'tgmd-color-muneco'
+/** Último color elegido (se usa en las fotos nuevas). */
+export function lastColor(): FigureColor {
+  try { return localStorage.getItem(LAST_COLOR) === 'azul' ? 'azul' : 'dorado' } catch { return 'dorado' }
+}
+export function rememberColor(c: FigureColor) { try { localStorage.setItem(LAST_COLOR, c) } catch { /* sin almacenamiento */ } }
 /** Transparencia del muñeco: es solo una guía, la foto debe verse a través. */
 export const FIGURE_OPACITY = 0.7
 const dist = (a: [number, number], b: [number, number]) => Math.hypot(a[0] - b[0], a[1] - b[1])
 
 /** Muñeco dibujado como grupo SVG (en unidades de foto): trazo fino, sin borde y semitransparente.
  *  El lado lejano va más claro. Con `editing` se ven los puntos de las articulaciones para arrastrarlos. */
-export function Figure({ pose, active, editing }: { pose: Pose; active?: Joint | null; editing?: boolean }) {
+export function Figure({ pose, active, editing, color = 'dorado' }: { pose: Pose; active?: Joint | null; editing?: boolean; color?: FigureColor }) {
+  const { near: NEAR, far: FAR } = COLORS[color]
   const thigh = (dist(pose.hip, pose.kneeN) + dist(pose.hip, pose.kneeF)) / 2 || 40
   const sw = Math.max(2, thigh * 0.042)
   const seg = (a: Joint, b: Joint) => `M${pose[a][0]} ${pose[a][1]} L${pose[b][0]} ${pose[b][1]}`
