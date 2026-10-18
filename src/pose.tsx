@@ -60,11 +60,13 @@ const STAND: Spec = { trunk: 0, armN: [-8, 5], armF: [8, 10], legN: [3, 0, 90], 
 // ---------- Fases por habilidad (con la postura de referencia de cada una) ----------
 export interface Phase { id: string; name: string; spec: Spec }
 export const PHASES: Record<string, Phase[]> = {
+  // Muñeco mirando a la derecha: se ve el lado izquierdo del niño (lado cercano = izquierdo).
+  // Vuelo de un lado = vuelo después de empujar con ese pie: esa pierna queda atrás y la otra rodilla arriba.
   correr: [
-    { id: 'apoyo', name: 'Apoyo anterior', spec: { trunk: 8, armN: [-20, 60], armF: [25, 115], legN: [22, 4, 100], legF: [-15, -95, -10] } },
-    { id: 'empuje', name: 'Empuje · rodilla arriba', spec: { trunk: 10, armN: [-45, 45], armF: [45, 140], legN: [88, 2, 80], legF: [-30, -40, -50] } },
-    { id: 'vuelo', name: 'Vuelo', spec: { trunk: 10, armN: [-40, 50], armF: [40, 135], legN: [65, -5, 85], legF: [-35, -110, -60] } },
-    { id: 'aterrizaje', name: 'Aterrizaje', spec: { trunk: 8, armN: [-30, 55], armF: [35, 125], legN: [25, 6, 100], legF: [-10, -70, -20] } },
+    { id: 'apoyo', name: 'Apoyo izquierdo', spec: { trunk: 8, armN: [-20, 60], armF: [25, 115], legN: [22, 4, 100], legF: [-15, -95, -10] } },
+    { id: 'vuelo', name: 'Vuelo izquierdo', spec: { trunk: 10, armN: [40, 135], armF: [-40, 50], legN: [-35, -110, -60], legF: [65, -5, 85] } },
+    { id: 'apoyo-der', name: 'Apoyo derecho', spec: { trunk: 8, armN: [25, 115], armF: [-20, 60], legN: [-15, -95, -10], legF: [22, 4, 100] } },
+    { id: 'vuelo-der', name: 'Vuelo derecho', spec: { trunk: 10, armN: [-40, 50], armF: [40, 135], legN: [65, -5, 85], legF: [-35, -110, -60] } },
   ],
   'saltar-bipodal': [
     { id: 'preparacion', name: 'Preparación', spec: { trunk: 45, neck: 150, armN: [-125, -125], armF: [-118, -118], legN: [62, -28, 90], legF: [58, -30, 88] } },
