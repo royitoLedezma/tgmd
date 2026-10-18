@@ -134,14 +134,16 @@ export function transformPose(pose: Pose, op: { rotate?: number; scale?: number;
 }
 
 // ---------- Dibujo ----------
-export const NEAR = '#E9B44C', FAR = '#F6DFAE', OUTLINE = 'rgba(22,32,58,.85)'
+export const NEAR = '#F2B33D', FAR = '#D9822B'
+/** Transparencia del muñeco: es solo una guía, la foto debe verse a través. */
+export const FIGURE_OPACITY = 0.7
 const dist = (a: [number, number], b: [number, number]) => Math.hypot(a[0] - b[0], a[1] - b[1])
 
-/** Muñeco dibujado como grupo SVG (en unidades de foto). El lado lejano va más claro. */
-export function Figure({ pose, active }: { pose: Pose; active?: Joint | null }) {
+/** Muñeco dibujado como grupo SVG (en unidades de foto): trazo fino, sin borde y semitransparente.
+ *  El lado lejano va más claro. Con `editing` se ven los puntos de las articulaciones para arrastrarlos. */
+export function Figure({ pose, active, editing }: { pose: Pose; active?: Joint | null; editing?: boolean }) {
   const thigh = (dist(pose.hip, pose.kneeN) + dist(pose.hip, pose.kneeF)) / 2 || 40
-  const sw = Math.max(3, thigh * 0.075)
-  const ow = sw + Math.max(2, thigh * 0.045)
+  const sw = Math.max(2, thigh * 0.042)
   const seg = (a: Joint, b: Joint) => `M${pose[a][0]} ${pose[a][1]} L${pose[b][0]} ${pose[b][1]}`
   const far = [seg('neck', 'elbowF'), seg('elbowF', 'handF'), seg('hip', 'kneeF'), seg('kneeF', 'ankleF'), seg('ankleF', 'toeF')].join(' ')
   const headR = dist(pose.neck, pose.head) * 0.75
@@ -152,16 +154,16 @@ export function Figure({ pose, active }: { pose: Pose; active?: Joint | null }) 
   const line = { fill: 'none', strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
   return (
     <g>
-      <path d={far} {...line} stroke={OUTLINE} strokeWidth={ow} />
-      <path d={far} {...line} stroke={FAR} strokeWidth={sw} />
-      <path d={near} {...line} stroke={OUTLINE} strokeWidth={ow} />
-      <path d={near} {...line} stroke={NEAR} strokeWidth={sw} />
-      <circle cx={pose.head[0]} cy={pose.head[1]} r={headR} fill="none" stroke={OUTLINE} strokeWidth={ow} />
-      <circle cx={pose.head[0]} cy={pose.head[1]} r={headR} fill="none" stroke={NEAR} strokeWidth={sw} />
-      {JOINTS.filter((j) => j !== 'head').map((j) => (
-        <circle key={j} cx={pose[j][0]} cy={pose[j][1]} r={sw * 0.62} fill={j.endsWith('F') ? FAR : NEAR} stroke={OUTLINE} strokeWidth={sw * 0.3} />
-      ))}
-      {active && <circle cx={pose[active][0]} cy={pose[active][1]} r={sw * 2.2} fill="none" stroke="#fff" strokeWidth={sw * 0.45} />}
+      {/* La transparencia va en el grupo para que los cruces no se vean más oscuros. */}
+      <g opacity={FIGURE_OPACITY}>
+        <path d={far} {...line} stroke={FAR} strokeWidth={sw} />
+        <path d={near} {...line} stroke={NEAR} strokeWidth={sw} />
+        <circle cx={pose.head[0]} cy={pose.head[1]} r={headR} fill="none" stroke={NEAR} strokeWidth={sw} />
+        {editing && JOINTS.filter((j) => j !== 'head').map((j) => (
+          <circle key={j} cx={pose[j][0]} cy={pose[j][1]} r={sw * 1.1} fill={j.endsWith('F') ? FAR : NEAR} />
+        ))}
+      </g>
+      {active && <circle cx={pose[active][0]} cy={pose[active][1]} r={sw * 3.2} fill="none" stroke={NEAR} strokeWidth={sw * 0.8} />}
     </g>
   )
 }

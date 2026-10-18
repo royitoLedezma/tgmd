@@ -6,7 +6,7 @@ import { useStore } from './store'
 import { SKILLS, skillById, type Skill } from './skills'
 import { Top } from './ui'
 import { dateText } from './sessions'
-import { JOINTS, Figure, NEAR, FAR, OUTLINE, VISUAL_SKILLS, dragJoint, phaseName, phasesOf, startPose, transformPose, type Joint, type Pose } from './pose'
+import { JOINTS, Figure, NEAR, FAR, FIGURE_OPACITY, VISUAL_SKILLS, dragJoint, phaseName, phasesOf, startPose, transformPose, type Joint, type Pose } from './pose'
 import { deletePhoto, getPhoto, photoId, saveNote, setPhotoPose, useBlobUrl, useKidVisual, type KidVisual, type Photo, type SkillNote } from './photos'
 
 export const MAX_VISUAL_SKILLS = 4
@@ -210,7 +210,7 @@ export function PoseEditor() {
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
           style={{ width: '100%', maxHeight: '62vh', touchAction: 'none', display: 'block' }} role="img" aria-label="Foto con el muñeco">
           <PhotoImage photo={photo} H={H} />
-          {pose && <Figure pose={pose} active={active} />}
+          {pose && <Figure pose={pose} active={active} editing />}
         </svg>
       </div>
 
@@ -243,8 +243,8 @@ export function PoseEditor() {
           <button style={{ ...tool, width: '100%' }} onClick={() => save(startPose(skillId, phase, photo.w, photo.h))}>Poner muñeco</button>
         )}
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'var(--muted)' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 16, height: 5, background: NEAR, outline: `1px solid ${OUTLINE}` }} />Lado cercano</span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 16, height: 5, background: FAR, outline: `1px solid ${OUTLINE}` }} />Lado lejano</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 16, height: 3, borderRadius: 2, background: NEAR, opacity: FIGURE_OPACITY }} />Lado cercano</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 16, height: 3, borderRadius: 2, background: FAR, opacity: FIGURE_OPACITY }} />Lado lejano</span>
           <button onClick={async () => { if (window.confirm('¿Borrar esta foto del registro visual?')) { await deletePhoto(photo.id); nav(back) } }}
             style={{ marginLeft: 'auto', border: 'none', background: 'none', color: '#C2410C', fontSize: 13, fontWeight: 900, height: 40 }}>Borrar foto</button>
         </div>
@@ -275,7 +275,7 @@ export function VisualPageBody({ rows, styles }: { rows: VisualRow[]; styles: { 
           <span style={{ fontSize: 13, lineHeight: 1.5 }}>Fotos tomadas durante la evaluación, fase por fase. La figura dorada muestra la postura de referencia de cada fase.</span>
         </div>
         <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: MUTED, whiteSpace: 'nowrap' }}>
-          <svg width="22" height="10" aria-hidden="true"><line x1="2" y1="5" x2="20" y2="5" stroke={OUTLINE} strokeWidth="6" strokeLinecap="round" /><line x1="2" y1="5" x2="20" y2="5" stroke={NEAR} strokeWidth="4" strokeLinecap="round" /></svg>
+          <svg width="22" height="10" aria-hidden="true"><line x1="2" y1="5" x2="20" y2="5" stroke={NEAR} strokeOpacity={FIGURE_OPACITY} strokeWidth="3" strokeLinecap="round" /></svg>
           Postura de referencia
         </span>
       </div>
