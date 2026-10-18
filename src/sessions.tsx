@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useStore, createSession, updateSession, deleteSession, scoreId, type Session, type SessionMode, type Kid, type Folder, type Score } from './store'
 import { progress } from './scoring'
+import { deleteSessionPhotos } from './photos'
 import { useSessionClips, deleteSessionClips, deleteSessionVideos, videosMB, useStorageInfo, type ClipMeta } from './clips'
 import { CLIPS_PER_KID, MARKS_PER_KID } from './skills'
 import { ageText } from './age'
@@ -221,7 +222,7 @@ export function SessionView() {
       {sheet === 'delete' && (
         <Sheet title="¿Eliminar esta sesión?" onClose={() => setSheet(null)}>
           <p>Se borran también sus {okCount(clips)} videos de este celular. Los niños no se borran.</p>
-          <button className="btn danger" onClick={async () => { await deleteSessionClips(s.id); deleteSession(s.id); nav('/sesiones') }}>Sí, eliminar sesión y videos</button>
+          <button className="btn danger" onClick={async () => { await deleteSessionClips(s.id); await deleteSessionPhotos(s.id); deleteSession(s.id); nav('/sesiones') }}>Sí, eliminar sesión y videos</button>
         </Sheet>
       )}
     </>

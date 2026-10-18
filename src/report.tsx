@@ -5,6 +5,8 @@ import { computeResult, aeToMonths, dateFromIso, addMonths, type Norms, type Res
 import { SKILLS } from './skills'
 import type { TestData } from './excel'
 import { exportFoldersOf, folderLabel } from './exports'
+import { useKidVisual } from './photos'
+import { visualRows, VisualPageBody, type VisualRow } from './visual'
 
 /** Tests del niño hasta esta sesión (como máximo los 2 últimos: 1° anterior y 2° actual). */
 export function kidTests(kid: Kid, upTo: Session, sessions: Session[], scores: Score[], norms: Norms | null): TestData[] {
@@ -112,11 +114,11 @@ function Header({ right }: { right: string }) {
     </div>
   )
 }
-function Footer({ kid, date, page }: { kid: Kid; date: string; page: number }) {
+function Footer({ kid, date, page, total }: { kid: Kid; date: string; page: number; total: number }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderTop: `1px solid ${HAIR}`, paddingTop: 12, fontSize: 12, color: MUTED }}>
       <span>{kid.name} · Informe de desarrollo motor · {longDate(date)}</span>
-      <span>{page} / 2</span>
+      <span>{page} / {total}</span>
     </div>
   )
 }
@@ -267,7 +269,7 @@ function AgeTimeline({ tests, overMax }: { tests: TestData[]; overMax: boolean }
 }
 
 // ---------- Página 1: resumen ----------
-function PageSummary({ kid, tests, n }: { kid: Kid; tests: TestData[]; n: number }) {
+function PageSummary({ kid, tests, n, total }: { kid: Kid; tests: TestData[]; n: number; total: number }) {
   const cur = tests[tests.length - 1], prev = tests.length > 1 ? tests[0] : undefined
   const r = cur.result, a = r.age
   const name = kid.name.split(' ')[0]
@@ -352,13 +354,13 @@ function PageSummary({ kid, tests, n }: { kid: Kid; tests: TestData[]; n: number
         </span>
       </div>
 
-      <div style={{ marginTop: 'auto' }}><Footer kid={kid} date={cur.date} page={1} /></div>
+      <div style={{ marginTop: 'auto' }}><Footer kid={kid} date={cur.date} page={1} total={total} /></div>
     </div>
   )
 }
 
 // ---------- Página 2: detalle ----------
-function PageDetail({ kid, tests, sessionId, editable, n }: { kid: Kid; tests: TestData[]; sessionId: string; editable: boolean; n: number }) {
+function PageDetail({ kid, tests, sessionId, editable, n, total }: { kid: Kid; tests: TestData[]; sessionId: string; editable: boolean; n: number; total: number }) {
   const cur = tests[tests.length - 1], prev = tests.length > 1 ? tests[0] : undefined
   const r = cur.result
   const [conc, setConc] = useState(cur.score?.conclusions ?? '')
@@ -454,18 +456,33 @@ function PageDetail({ kid, tests, sessionId, editable, n }: { kid: Kid; tests: T
         <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: MUTED }}>
           <strong style={{ color: BODY }}>Nota.</strong> Evaluación del desarrollo motor con fines educativos y orientativos; no constituye un diagnóstico médico. Los resultados reflejan el desempeño del día de la evaluación y pueden variar con la práctica y la maduración. Para una evaluación clínica, consulte a un profesional de la salud.
         </p>
-        <Footer kid={kid} date={cur.date} page={2} />
+        <Footer kid={kid} date={cur.date} page={2} total={total} />
       </div>
     </div>
   )
 }
 
-/** Informe completo de un niño: 2 páginas tamaño carta. */
+// ---------- Página 3: registro visual (solo en el celular donde están las fotos) ----------
+function PageVisual({ kid, date, rows }: { kid: Kid; date: string; rows: VisualRow[] }) {
+  return (
+    <div className="report-page" style={pageStyle}>
+      <Header right="Registro visual" />
+      <VisualPageBody rows={rows} styles={{ INK, MUTED, HAIR, PANEL, SERIF, eyebrow }} />
+      <div style={{ marginTop: 'auto' }}><Footer kid={kid} date={date} page={3} total={3} /></div>
+    </div>
+  )
+}
+
+/** Informe completo de un niño: 2 páginas tamaño carta, y una 3.ª si este celular tiene su registro visual. */
 export function ReportPages({ kid, tests, sessionId, editable, n }: { kid: Kid; tests: TestData[]; sessionId: string; editable: boolean; n: number }) {
+  const rows = visualRows(useKidVisual(sessionId, kid.id))
+  const total = rows.length ? 3 : 2
+  const cur = tests[tests.length - 1]
   return (
     <>
-      <PageSummary kid={kid} tests={tests} n={n} />
-      <PageDetail kid={kid} tests={tests} sessionId={sessionId} editable={editable} n={n} />
+      <PageSummary kid={kid} tests={tests} n={n} total={total} />
+      <PageDetail kid={kid} tests={tests} sessionId={sessionId} editable={editable} n={n} total={total} />
+      {rows.length > 0 && <PageVisual kid={kid} date={cur.date} rows={rows} />}
     </>
   )
 }
@@ -513,11 +530,12 @@ export function ReportScreen() {
         <button className="icon-btn light" aria-label="Volver" onClick={() => nav(kidId ? `/sesion/${s.id}/resultados/${kidId}` : `/sesion/${s.id}/resultados`)}>✕</button>
         <span style={{ flex: 1, fontWeight: 900, fontSize: 16, minWidth: 120 }}>{kidId ? 'Informe gráfico' : `Informes del grupo (${kidList.length})`}</span>
         <button style={{ ...btn, background: '#F4F7FA', color: '#1B2733' }} onClick={suggest}>Sugerir texto</button>
+        {kidId && <button style={{ ...btn, background: '#F4F7FA', color: '#1B2733' }} onClick={() => nav(`/sesion/${s.id}/registro/${kidId}`)}>Registro visual</button>}
         <button style={{ ...btn, background: '#0B7A61', color: '#fff' }} disabled={busy} onClick={excel}>{busy ? 'Generando…' : `Excel de ${[...new Set(kidList.map((k) => folderLabel(k.folderId)))].join(' + ')}`}</button>
         <button style={{ ...btn, background: '#0A6FA8', color: '#fff' }} onClick={() => window.print()}>PDF / Imprimir</button>
       </div>
       <div className="no-print" style={{ padding: '8px 12px', fontSize: 13, color: '#33414E' }}>
-        Cada informe tiene 2 páginas. Toca “Sugerir texto” para un borrador de conclusiones y recomendaciones, y edítalo en los recuadros amarillos de la página 2. Para el PDF, elige “Guardar como PDF” en la ventana de impresión.
+        Cada informe tiene 2 páginas, y una 3.ª con el registro visual si este celular tiene sus fotos (botón “Registro visual” en el informe de cada niño). Toca “Sugerir texto” para un borrador de conclusiones y recomendaciones, y edítalo en los recuadros amarillos de la página 2. Para el PDF, elige “Guardar como PDF” en la ventana de impresión.
       </div>
       <div className="report-wrap" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '8px 8px 24px' }}>
         {kidList.map((k) => {

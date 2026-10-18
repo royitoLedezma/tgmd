@@ -6,6 +6,8 @@ import { SKILLS, MARKS_PER_KID, skillById, maxScore, type Skill } from './skills
 import { Icon, Top } from './ui'
 import { dateText } from './sessions'
 import { safeName } from './excel'
+import { phasesOf } from './pose'
+import { savePhoto, photoId, useKidVisual } from './photos'
 
 const markKey = (skillId: string, i: number) => `${skillId}:${i}`
 const EMPTY: [Mark, Mark] = [null, null]
@@ -57,8 +59,11 @@ export function ScoreKids() {
 
 // ---------------- Reproductor con cámara lenta, cuadro a cuadro y zoom ----------------
 const FRAME = 1 / 30
-function Player({ blobKey, photoName }: { blobKey: string; photoName: string }) {
+interface PhotoCtx { sessionId: string; kidId: string; skillId: string }
+function Player({ blobKey, photoName, ctx }: { blobKey: string; photoName: string; ctx: PhotoCtx }) {
   const [toast, setToast] = useState('')
+  const [pending, setPending] = useState<{ blob: Blob; w: number; h: number; name: string } | null>(null)
+  const vis = useKidVisual(ctx.sessionId, ctx.kidId)
   const [url, setUrl] = useState<string | null>(null)
   const [missing, setMissing] = useState(false)
   const [speed, setSpeed] = useState(0.5)
@@ -83,7 +88,15 @@ function Player({ blobKey, photoName }: { blobKey: string; photoName: string }) 
   useEffect(() => { if (vref.current) vref.current.playbackRate = speed }, [speed, url])
 
   const v = () => vref.current
-  // Foto del cuadro actual: se descarga como imagen (aparece en la Galería, álbum Descargas).
+  const flash = (t: string) => { setToast(t); setTimeout(() => setToast(''), 2500) }
+  const download = (b: Blob, name: string) => {
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(b)
+    a.download = name
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+  }
+  // Foto del cuadro actual: se elige la fase para el registro visual (página 3) y además se descarga a la Galería.
   const snap = () => {
     const el = v()
     if (!el || !el.videoWidth) return
@@ -97,20 +110,26 @@ function Player({ blobKey, photoName }: { blobKey: string; photoName: string }) 
       return [Math.min(vw, Math.max(0, (ex - ox) / s0)), Math.min(vh, Math.max(0, (ey - oy) / s0))]
     }
     const [x0, y0] = toVideo(0, 0), [x1, y1] = toVideo(W, H)
-    const cw = Math.max(1, Math.round(x1 - x0)), ch = Math.max(1, Math.round(y1 - y0))
+    const k = Math.min(1, 1280 / Math.max(1, x1 - x0)) // como máximo 1280 px de ancho
+    const cw = Math.max(1, Math.round((x1 - x0) * k)), ch = Math.max(1, Math.round((y1 - y0) * k))
     const c = document.createElement('canvas')
     c.width = cw; c.height = ch
     c.getContext('2d')?.drawImage(el, x0, y0, x1 - x0, y1 - y0, 0, 0, cw, ch)
     c.toBlob((b) => {
-      if (!b) return
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(b)
-      a.download = `${photoName}_${el.currentTime.toFixed(2).replace('.', 's')}.jpg`
-      document.body.appendChild(a); a.click(); a.remove()
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000)
-      setToast(zoom > 1 ? 'Foto recortada guardada (Galería › Descargas)' : 'Foto guardada (Galería › Descargas)')
-      setTimeout(() => setToast(''), 2500)
-    }, 'image/jpeg', 0.92)
+      if (b) setPending({ blob: b, w: cw, h: ch, name: `${photoName}_${el.currentTime.toFixed(2).replace('.', 's')}.jpg` })
+    }, 'image/jpeg', 0.9)
+  }
+  const keep = async (phase: string | null, label?: string) => {
+    if (!pending) return
+    const p = pending
+    setPending(null)
+    download(p.blob, p.name)
+    if (phase) {
+      try {
+        await savePhoto({ ...ctx, phase, blob: p.blob, w: p.w, h: p.h })
+        flash(`Guardada para el informe · ${label}`)
+      } catch { flash('No se pudo guardar en la app (sí en la Galería)') }
+    } else flash(zoom > 1 ? 'Foto recortada guardada (Galería › Descargas)' : 'Foto guardada (Galería › Descargas)')
   }
   const toggle = () => { const el = v(); if (!el) return; if (el.paused) { el.playbackRate = speed; el.play() } else el.pause() }
   const step = (dir: 1 | -1) => { const el = v(); if (!el) return; el.pause(); el.currentTime = Math.max(0, Math.min(el.duration || 0, el.currentTime + dir * FRAME)) }
@@ -169,6 +188,26 @@ function Player({ blobKey, photoName }: { blobKey: string; photoName: string }) 
             style={{ width: '100%', height: '100%', objectFit: 'contain', transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`, transition: pointers.current.size ? 'none' : 'transform .15s' }} />
         )}
         {toast && <div role="status" style={{ position: 'absolute', left: '50%', bottom: 18, transform: 'translateX(-50%)', whiteSpace: 'nowrap', background: 'rgba(11,122,97,.95)', color: '#fff', fontSize: 13, fontWeight: 700, padding: '6px 10px', borderRadius: 8, zIndex: 2 }}>{toast}</div>}
+        {pending && (
+          <div role="dialog" aria-label="Guardar foto" style={{ position: 'absolute', inset: 0, background: 'rgba(15,23,32,.92)', zIndex: 3, display: 'flex', flexDirection: 'column', gap: 8, padding: 12, overflowY: 'auto' }}>
+            <span style={{ color: '#fff', fontSize: 15, fontWeight: 900 }}>¿A qué fase corresponde?</span>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6 }}>
+              {phasesOf(ctx.skillId).map((ph) => {
+                const taken = vis?.photos.has(photoId(ctx.sessionId, ctx.kidId, ctx.skillId, ph.id))
+                return (
+                  <button key={ph.id} onClick={() => keep(ph.id, ph.name)}
+                    style={{ minHeight: 44, borderRadius: 10, border: 'none', background: '#fff', color: '#1B2733', fontSize: 14, fontWeight: 900, padding: '4px 8px', lineHeight: 1.2 }}>
+                    {ph.name}{taken && <span style={{ display: 'block', fontSize: 11, fontWeight: 700, color: '#92400E' }}>reemplaza la anterior</span>}
+                  </button>
+                )
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={() => keep(null)} style={{ flex: 1, height: 40, borderRadius: 10, border: '1.5px solid #fff', background: 'transparent', color: '#fff', fontSize: 14, fontWeight: 700 }}>Solo a la Galería</button>
+              <button onClick={() => setPending(null)} style={{ flex: 1, height: 40, borderRadius: 10, border: 'none', background: 'transparent', color: '#B8C4CF', fontSize: 14, fontWeight: 700 }}>Cancelar</button>
+            </div>
+          </div>
+        )}
         {missing && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#B8C4CF', padding: 20, textAlign: 'center', fontSize: 15 }}>No hay video de este intento en este celular (se saltó, no se grabó o se borró para liberar espacio). Igual puedes marcar los criterios.</div>}
         {url && (
           <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(0,0,0,.6)', borderRadius: 12, padding: 4 }}>
@@ -286,7 +325,7 @@ export function ScoreSkill() {
         ))}
       </div>
 
-      <Player blobKey={clipKey(s.id, kid.id, skill.id, attempt)} photoName={safeName(`${kid.name}_${skill.name}_I${attempt}`)} />
+      <Player blobKey={clipKey(s.id, kid.id, skill.id, attempt)} photoName={safeName(`${kid.name}_${skill.name}_I${attempt}`)} ctx={{ sessionId: s.id, kidId: kid.id, skillId: skill.id }} />
 
       <main style={{ flex: 1, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, fontSize: 12, fontWeight: 700, color: 'var(--muted)', paddingRight: 2 }}>
