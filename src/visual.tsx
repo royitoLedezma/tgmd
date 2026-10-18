@@ -6,7 +6,7 @@ import { useStore } from './store'
 import { SKILLS, skillById, type Skill } from './skills'
 import { Top } from './ui'
 import { dateText } from './sessions'
-import { JOINTS, Figure, COLORS, FIGURE_OPACITY, lastColor, rememberColor, type FigureColor, VISUAL_SKILLS, dragJoint, phaseName, phasesOf, startPose, transformPose, type Joint, type Pose } from './pose'
+import { JOINTS, Figure, COLORS, FIGURE_OPACITY, lastColor, rememberColor, type FigureColor, VISUAL_SKILLS, dragJoint, stretchJoint, normalizePose, phaseName, phasesOf, startPose, transformPose, type Joint, type Pose } from './pose'
 import { deletePhoto, getPhoto, photoId, saveNote, updatePhoto, useBlobUrl, useKidVisual, type KidVisual, type Photo, type SkillNote } from './photos'
 
 export const MAX_VISUAL_SKILLS = 4
@@ -133,7 +133,17 @@ export function PoseEditor() {
   const [active, setActive] = useState<Joint | null>(null)
   const [color, setColor] = useState<FigureColor>('dorado')
   const svgRef = useRef<SVGSVGElement>(null)
-  const dragging = useRef<Joint | null>(null)
+  const [stretching, setStretching] = useState(false)
+  // Gestos: un dedo sobre un punto = girar ese tramo; mantener pulsado = estirarlo; dos dedos = agrandar o achicar.
+  const pointers = useRef(new Map<number, { x: number; y: number }>())
+  const gesture = useRef<
+    | { kind: 'joint'; j: Joint; stretch: boolean; x0: number; y0: number }
+    | { kind: 'pinch'; d0: number; base: Pose }
+    | null
+  >(null)
+  const holdTimer = useRef<number | undefined>(undefined)
+  const clearHold = () => { if (holdTimer.current) { window.clearTimeout(holdTimer.current); holdTimer.current = undefined } }
+  useEffect(() => clearHold, [])
   const back = `/sesion/${id}/registro/${kidId}`
 
   useEffect(() => {
@@ -148,7 +158,7 @@ export function PoseEditor() {
         const c = p.color ?? lastColor()
         setPose(start); setColor(c)
         updatePhoto(p.id, { pose: start, color: c })
-      } else { setPose(p.pose); setColor(p.color ?? 'dorado') }
+      } else { setPose(p.pose ? normalizePose(p.pose) : null); setColor(p.color ?? 'dorado') }
     }).catch(() => { if (alive) setPhoto(null) })
     return () => { alive = false }
   }, [id, kidId, skillId, phase])
@@ -162,8 +172,18 @@ export function PoseEditor() {
     const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse())
     return [pt.x, pt.y]
   }
+  const spread = () => { const [a, b] = [...pointers.current.values()]; return Math.hypot(a.x - b.x, a.y - b.y) || 1 }
   const onDown = (e: RPointerEvent<SVGSVGElement>) => {
     if (!pose) return
+    e.currentTarget.setPointerCapture(e.pointerId)
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (pointers.current.size >= 2) {
+      // Segundo dedo: se pasa a pellizcar (se deja de mover el punto).
+      clearHold()
+      gesture.current = { kind: 'pinch', d0: spread(), base: pose }
+      setActive(null); setStretching(false)
+      return
+    }
     const p = toSvg(e), m = svgRef.current?.getScreenCTM()
     if (!p || !m) return
     const reach = 30 / m.a // ~30 px de pantalla para tocar una articulación
@@ -174,21 +194,38 @@ export function PoseEditor() {
       const bias = j === 'hip' ? 1.15 : 1
       if (d * bias < bd) { bd = d * bias; best = j }
     }
-    if (best && bd <= reach) {
-      e.currentTarget.setPointerCapture(e.pointerId)
-      dragging.current = best
-      setActive(best)
+    if (!best || bd > reach) return
+    gesture.current = { kind: 'joint', j: best, stretch: false, x0: e.clientX, y0: e.clientY }
+    setActive(best)
+    if (best !== 'hip') {
+      holdTimer.current = window.setTimeout(() => {
+        const g = gesture.current
+        if (g?.kind === 'joint') { g.stretch = true; setStretching(true); try { navigator.vibrate?.(30) } catch { /* sin vibración */ } }
+      }, 450)
     }
   }
   const onMove = (e: RPointerEvent<SVGSVGElement>) => {
-    const j = dragging.current, p = toSvg(e)
-    if (!j || !p || !pose) return
-    setPose(dragJoint(pose, j, p))
+    if (!pointers.current.has(e.pointerId)) return
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    const g = gesture.current
+    if (!g || !pose) return
+    if (g.kind === 'pinch') {
+      if (pointers.current.size >= 2) setPose(transformPose(g.base, { scale: spread() / g.d0 }))
+      return
+    }
+    // Si el dedo se movió antes de cumplir el tiempo, es un arrastre normal (sin estirar).
+    if (!g.stretch && Math.hypot(e.clientX - g.x0, e.clientY - g.y0) > 8) clearHold()
+    const p = toSvg(e)
+    if (!p) return
+    setPose(g.stretch ? stretchJoint(pose, g.j, p) : dragJoint(pose, g.j, p))
   }
-  const onUp = () => {
-    if (dragging.current && pose) save(pose)
-    dragging.current = null
-    setActive(null)
+  const onUp = (e: RPointerEvent<SVGSVGElement>) => {
+    pointers.current.delete(e.pointerId)
+    clearHold()
+    if (gesture.current && pose) save(pose)
+    // Al soltar un dedo del pellizco no se sigue moviendo nada hasta volver a tocar.
+    gesture.current = null
+    setActive(null); setStretching(false)
   }
 
   if (photo === undefined) return <div className="empty">Cargando…</div>
@@ -213,7 +250,7 @@ export function PoseEditor() {
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
           style={{ width: '100%', maxHeight: '62vh', touchAction: 'none', display: 'block' }} role="img" aria-label="Foto con el muñeco">
           <PhotoImage photo={photo} H={H} />
-          {pose && <Figure pose={pose} active={active} editing color={color} />}
+          {pose && <Figure pose={pose} active={active} stretching={stretching} editing color={color} />}
         </svg>
       </div>
 
@@ -221,7 +258,7 @@ export function PoseEditor() {
         {pose ? (
           <>
             <div style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center' }}>
-              Arrastra cualquier punto: el resto del brazo o la pierna lo sigue. La cadera mueve todo el muñeco.
+              Arrastra un punto para girar ese tramo; mantenlo pulsado (vibra) y arrastra para estirarlo o acortarlo. Pellizca con dos dedos para agrandar o achicar. La cadera mueve todo el muñeco.
             </div>
             <div style={{ display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
               <button style={tool} aria-label="Achicar" onClick={() => op({ scale: 1 / 1.08 })}>−</button>
