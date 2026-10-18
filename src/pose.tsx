@@ -103,14 +103,29 @@ export function startPose(skillId: string, phase: string, w: number, h: number, 
   return out
 }
 
-/** Completa posturas guardadas antes de que existieran los hombros y la cadera a lo ancho. */
+/** La cadera y los hombros son piezas rígidas: cada recta pasa por su centro (cadera y cuello). */
+const PAIR: Partial<Record<Joint, Joint>> = { hipN: 'hipF', hipF: 'hipN', shoulderN: 'shoulderF', shoulderF: 'shoulderN' }
+
+/** Completa posturas guardadas antes de que existieran los hombros y la cadera a lo ancho,
+ *  y vuelve a centrar la cadera y los hombros si quedaron corridos. */
 export function normalizePose(p: Pose): Pose {
-  if (p.shoulderN && p.hipN) return p
-  const h = Math.hypot(p.neck[0] - p.hip[0], p.neck[1] - p.hip[1]) / (L.lowBack + L.upBack) || 100
-  const t = [(p.neck[0] - p.hip[0]), (p.neck[1] - p.hip[1])], tl = Math.hypot(t[0], t[1]) || 1
-  const perp: [number, number] = [-t[1] / tl, t[0] / tl]
-  const off = (c: [number, number], k: number): [number, number] => [c[0] + perp[0] * k * h, c[1] + perp[1] * k * h]
-  return { ...p, shoulderN: off(p.neck, L.shoulder), shoulderF: off(p.neck, -L.shoulder), hipN: off(p.hip, L.pelvis), hipF: off(p.hip, -L.pelvis) }
+  let out = p
+  if (!p.shoulderN || !p.hipN) {
+    const h = Math.hypot(p.neck[0] - p.hip[0], p.neck[1] - p.hip[1]) / (L.lowBack + L.upBack) || 100
+    const t = [(p.neck[0] - p.hip[0]), (p.neck[1] - p.hip[1])], tl = Math.hypot(t[0], t[1]) || 1
+    const perp: [number, number] = [-t[1] / tl, t[0] / tl]
+    const off = (c: [number, number], k: number): [number, number] => [c[0] + perp[0] * k * h, c[1] + perp[1] * k * h]
+    out = { ...p, shoulderN: off(p.neck, L.shoulder), shoulderF: off(p.neck, -L.shoulder), hipN: off(p.hip, L.pelvis), hipF: off(p.hip, -L.pelvis) }
+  }
+  for (const [a, b, c] of [['hipN', 'hipF', 'hip'], ['shoulderN', 'shoulderF', 'neck']] as [Joint, Joint, Joint][]) {
+    const A = out[a], B = out[b], C = out[c]
+    const mx = (A[0] + B[0]) / 2 - C[0], my = (A[1] + B[1]) / 2 - C[1]
+    if (Math.hypot(mx, my) < 0.5) continue
+    // Corre cada lado (con lo que cuelga de él) para que la recta quede centrada.
+    out = { ...out }
+    ;[a, ...descendants(a), b, ...descendants(b)].forEach((k) => { out[k] = [out[k][0] - mx, out[k][1] - my] })
+  }
+  return out
 }
 
 // ---------- Movimientos ----------
@@ -133,17 +148,29 @@ export function dragJoint(pose: Pose, j: Joint, to: [number, number]): Pose {
   const a0 = Math.atan2(pose[j][1] - c[1], pose[j][0] - c[0])
   const a1 = Math.atan2(to[1] - c[1], to[0] - c[0])
   const d = a1 - a0
-  ;[j, ...descendants(j)].forEach((k) => { out[k] = rot(pose[k], c, d) })
+  const mate = PAIR[j]
+  ;[j, ...descendants(j), ...(mate ? [mate, ...descendants(mate)] : [])].forEach((k) => { out[k] = rot(pose[k], c, d) })
   return out
 }
 
 /** Estira o acorta el tramo que termina en esta articulación: la lleva al dedo y lo que cuelga de ella
  *  se desplaza igual, sin deformarse. En la cadera mueve todo el muñeco. */
 export function stretchJoint(pose: Pose, j: Joint, to: [number, number]): Pose {
-  if (!PARENT[j]) return dragJoint(pose, j, to)
+  const parent = PARENT[j]
+  if (!parent) return dragJoint(pose, j, to)
   const out = { ...pose }
-  const dx = to[0] - pose[j][0], dy = to[1] - pose[j][1]
-  ;[j, ...descendants(j)].forEach((k) => { out[k] = [pose[k][0] + dx, pose[k][1] + dy] })
+  const move = (root: Joint, target: [number, number]) => {
+    const dx = target[0] - pose[root][0], dy = target[1] - pose[root][1]
+    ;[root, ...descendants(root)].forEach((k) => { out[k] = [pose[k][0] + dx, pose[k][1] + dy] })
+  }
+  move(j, to)
+  // Cadera y hombros: el otro lado se abre o se cierra en espejo, así la recta sigue pasando por el centro.
+  const mate = PAIR[j]
+  if (mate) {
+    const c = pose[parent], r0 = Math.hypot(pose[j][0] - c[0], pose[j][1] - c[1]) || 1
+    const v = [to[0] - c[0], to[1] - c[1]], rm = Math.hypot(pose[mate][0] - c[0], pose[mate][1] - c[1]) / r0
+    move(mate, [c[0] - v[0] * rm, c[1] - v[1] * rm])
+  }
   return out
 }
 
