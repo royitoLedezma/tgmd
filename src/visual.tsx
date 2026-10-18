@@ -134,11 +134,13 @@ export function PoseEditor() {
   const [color, setColor] = useState<FigureColor>('dorado')
   const svgRef = useRef<SVGSVGElement>(null)
   const [stretching, setStretching] = useState(false)
+  const [moveAll, setMoveAll] = useState(false) // "Mover todo": arrastrar en cualquier parte mueve el muñeco entero
   // Gestos: un dedo sobre un punto = girar ese tramo; mantener pulsado = estirarlo; dos dedos = agrandar o achicar.
   const pointers = useRef(new Map<number, { x: number; y: number }>())
   const gesture = useRef<
     | { kind: 'joint'; j: Joint; stretch: boolean; x0: number; y0: number }
     | { kind: 'pinch'; d0: number; base: Pose }
+    | { kind: 'move'; from: [number, number]; base: Pose }
     | null
   >(null)
   const holdTimer = useRef<number | undefined>(undefined)
@@ -186,6 +188,7 @@ export function PoseEditor() {
     }
     const p = toSvg(e), m = svgRef.current?.getScreenCTM()
     if (!p || !m) return
+    if (moveAll) { gesture.current = { kind: 'move', from: p, base: pose }; setActive('hip'); return }
     const reach = 30 / m.a // ~30 px de pantalla para tocar una articulación
     let best: Joint | null = null, bd = Infinity
     for (const j of JOINTS) {
@@ -211,6 +214,11 @@ export function PoseEditor() {
     if (!g || !pose) return
     if (g.kind === 'pinch') {
       if (pointers.current.size >= 2) setPose(transformPose(g.base, { scale: spread() / g.d0 }))
+      return
+    }
+    if (g.kind === 'move') {
+      const p = toSvg(e)
+      if (p) setPose(dragJoint(g.base, 'hip', [g.base.hip[0] + p[0] - g.from[0], g.base.hip[1] + p[1] - g.from[1]]))
       return
     }
     // Si el dedo se movió antes de cumplir el tiempo, es un arrastre normal (sin estirar).
@@ -258,7 +266,7 @@ export function PoseEditor() {
         {pose ? (
           <>
             <div style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center' }}>
-              Arrastra un punto para girar ese tramo; mantenlo pulsado (vibra) y arrastra para estirarlo o acortarlo. Pellizca con dos dedos para agrandar o achicar. La cadera mueve todo el muñeco.
+              {moveAll ? 'Mover todo activado: arrastra en cualquier parte de la foto para mover el muñeco entero. Toca el botón otra vez para volver a mover puntos.' : 'Arrastra un punto para girar ese tramo; mantenlo pulsado (vibra) y arrastra para estirarlo o acortarlo. Pellizca con dos dedos para agrandar o achicar. La cadera mueve todo el muñeco.'}
             </div>
             <div style={{ display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
               <button style={tool} aria-label="Achicar" onClick={() => op({ scale: 1 / 1.08 })}>−</button>
@@ -266,6 +274,7 @@ export function PoseEditor() {
               <button style={tool} aria-label="Girar a la izquierda" onClick={() => op({ rotate: -5 })}>⟲</button>
               <button style={tool} aria-label="Girar a la derecha" onClick={() => op({ rotate: 5 })}>⟳</button>
               <button style={tool} onClick={() => op({ flip: true })}>⇋ Voltear</button>
+              <button style={{ ...tool, ...(moveAll ? { border: '2px solid #0A6FA8', background: '#E6F1F8', color: '#075A88' } : {}) }} aria-pressed={moveAll} onClick={() => setMoveAll(!moveAll)}>✥ Mover todo</button>
             </div>
             <div role="radiogroup" aria-label="Color del muñeco" style={{ display: 'flex', gap: 6 }}>
               {(Object.keys(COLORS) as FigureColor[]).map((c) => (
