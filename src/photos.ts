@@ -64,6 +64,24 @@ export async function savePhoto(p: Omit<Photo, 'id' | 'sk' | 'createdAt'>) {
   changed()
 }
 
+/** Prepara una imagen elegida del celular: la achica a 1280 px de ancho como máximo y la pasa a JPG. */
+export async function imageFromFile(file: File): Promise<{ blob: Blob; w: number; h: number }> {
+  const url = URL.createObjectURL(file)
+  try {
+    const img = new Image()
+    img.src = url
+    await img.decode() // respeta la orientación con que se sacó la foto
+    const k = Math.min(1, 1280 / Math.max(1, img.naturalWidth))
+    const w = Math.max(1, Math.round(img.naturalWidth * k)), h = Math.max(1, Math.round(img.naturalHeight * k))
+    const c = document.createElement('canvas')
+    c.width = w; c.height = h
+    c.getContext('2d')?.drawImage(img, 0, 0, w, h)
+    const blob = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/jpeg', 0.9))
+    if (!blob) throw new Error('No se pudo leer la imagen')
+    return { blob, w, h }
+  } finally { URL.revokeObjectURL(url) }
+}
+
 export async function updatePhoto(id: string, patch: Partial<Pick<Photo, 'marks'>>) {
   const cur = await tx<Photo | undefined>(['photos'], 'readonly', (t) => t.objectStore('photos').get(id))
   if (!cur) return

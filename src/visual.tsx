@@ -8,7 +8,7 @@ import { Top } from './ui'
 import { dateText } from './sessions'
 import { VISUAL_SKILLS, phaseName, phasesOf } from './phases'
 import { MARK_COLORS, MARK_WIDTHS, MarkHandles, Marks, dragHandle, handles, hits, lastStyle, moveMark, newEllipse, newLine, pinchMark, rememberStyle, type Handle, type Mark, type MarkColor, type MarkWidth } from './marks'
-import { deletePhoto, getPhoto, photoId, saveNote, updatePhoto, useBlobUrl, useKidVisual, type KidVisual, type Photo, type SkillNote } from './photos'
+import { deletePhoto, getPhoto, imageFromFile, photoId, savePhoto, saveNote, updatePhoto, useBlobUrl, useKidVisual, type KidVisual, type Photo, type SkillNote } from './photos'
 
 export const MAX_VISUAL_SKILLS = 4
 
@@ -74,6 +74,25 @@ export function VisualScreen() {
   )
 }
 
+const emptyBtn: CSSProperties = { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--blue-dark)', fontSize: 13, fontWeight: 900, textDecoration: 'none', cursor: 'pointer' }
+
+/** Botón que abre la galería del celular y entrega la imagen ya preparada. */
+function PickImage({ onImage, style, aria, children }: { onImage: (img: { blob: Blob; w: number; h: number }) => unknown; style: CSSProperties; aria: string; children: React.ReactNode }) {
+  const [busy, setBusy] = useState(false)
+  return (
+    <label aria-label={aria} style={{ ...style, opacity: busy ? 0.5 : 1 }}>
+      {busy ? 'Cargando…' : children}
+      <input type="file" accept="image/*" hidden disabled={busy} onChange={async (e) => {
+        const f = e.target.files?.[0]
+        e.target.value = '' // permite volver a elegir la misma imagen
+        if (!f) return
+        setBusy(true)
+        try { await onImage(await imageFromFile(f)) } catch { window.alert('No se pudo abrir esa imagen.') } finally { setBusy(false) }
+      }} />
+    </label>
+  )
+}
+
 function SkillCard({ sessionId, kidId, skill, vis, note, inReport }: { sessionId: string; kidId: string; skill: Skill; vis: KidVisual | null; note?: SkillNote; inReport: boolean }) {
   const [comment, setComment] = useState(note?.comment ?? '')
   useEffect(() => { setComment(note?.comment ?? '') }, [note?.comment])
@@ -101,10 +120,12 @@ function SkillCard({ sessionId, kidId, skill, vis, note, inReport }: { sessionId
                   <PhotoView photo={p} width="100%" height={92} />
                 </Link>
               ) : (
-                <Link to={`/sesion/${sessionId}/puntuar/${kidId}/${skill.id}`} aria-label={`Sacar foto: ${ph.name}`}
-                  style={{ height: 92, borderRadius: 8, border: '1.5px dashed #CBD5DF', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12, fontWeight: 700, textDecoration: 'none', textAlign: 'center', padding: 4 }}>
-                  Sacar foto
-                </Link>
+                <div style={{ height: 92, borderRadius: 8, border: '1.5px dashed #CBD5DF', background: 'var(--bg)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  <Link to={`/sesion/${sessionId}/puntuar/${kidId}/${skill.id}`} aria-label={`Sacar foto del video: ${ph.name}`} style={emptyBtn}>Del video</Link>
+                  <span style={{ height: 1, background: '#CBD5DF', margin: '0 6px' }} />
+                  <PickImage aria={`Subir foto del celular: ${ph.name}`} style={emptyBtn}
+                    onImage={(img) => savePhoto({ sessionId, kidId, skillId: skill.id, phase: ph.id, ...img })}>Subir</PickImage>
+                </div>
               )}
               <span style={{ fontSize: 12, lineHeight: 1.2, color: 'var(--muted)', textAlign: 'center' }}>{ph.name}</span>
             </div>
@@ -290,6 +311,12 @@ export function MarkEditor() {
             <button onClick={() => { save(marks.filter((m) => m.id !== selected.id)); setSel(null) }}
               style={{ ...tool, color: '#C2410C' }}>Borrar marca</button>
           )}
+          <PickImage aria="Reemplazar foto por otra del celular" style={{ ...tool, marginLeft: selected ? 0 : undefined }} onImage={async (img) => {
+            const keep = marks.length > 0 && !window.confirm('¿Quitar las marcas de la foto anterior?\n\nAceptar: la foto nueva queda sin marcas.\nCancelar: se conservan las marcas.')
+            await savePhoto({ sessionId: id, kidId, skillId, phase, ...img, ...(keep ? { marks } : {}) })
+            const p = await getPhoto(photo.id)
+            setPhoto(p ?? null); setMarks(p?.marks ?? []); setSel(null)
+          }}>Reemplazar foto</PickImage>
           <button onClick={async () => { if (window.confirm('¿Borrar esta foto del registro visual?')) { await deletePhoto(photo.id); nav(back) } }}
             style={{ marginLeft: 'auto', border: 'none', background: 'none', color: '#C2410C', fontSize: 13, fontWeight: 900, height: 40 }}>Borrar foto</button>
         </div>
