@@ -6,7 +6,7 @@ import { SKILLS, MARKS_PER_KID, skillById, maxScore, type Skill } from './skills
 import { Icon, Top } from './ui'
 import { dateText } from './sessions'
 import { safeName } from './excel'
-import { phasesOf } from './pose'
+import { phasesOf } from './phases'
 import { savePhoto, photoId, useKidVisual } from './photos'
 
 const markKey = (skillId: string, i: number) => `${skillId}:${i}`

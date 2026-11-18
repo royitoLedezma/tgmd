@@ -1,4 +1,4 @@
-// Registro visual (página 3 del informe): fotos por fase con el muñeco de palitos encima.
+// Registro visual (página 3 del informe): fotos por fase con marcas del evaluador (círculos/óvalos y líneas).
 // Todo vive solo en este celular. En otro dispositivo (la compu) el informe sale con 2 páginas.
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
@@ -6,20 +6,20 @@ import { useStore } from './store'
 import { SKILLS, skillById, type Skill } from './skills'
 import { Top } from './ui'
 import { dateText } from './sessions'
-import { JOINTS, Figure, COLORS, FIGURE_OPACITY, lastColor, rememberColor, type FigureColor, VISUAL_SKILLS, dragJoint, stretchJoint, normalizePose, phaseName, phasesOf, startPose, transformPose, type Joint, type Pose } from './pose'
+import { VISUAL_SKILLS, phaseName, phasesOf } from './phases'
+import { MARK_COLORS, MARK_WIDTHS, MarkHandles, Marks, dragHandle, handles, hits, lastStyle, moveMark, newEllipse, newLine, pinchMark, rememberStyle, type Handle, type Mark, type MarkColor, type MarkWidth } from './marks'
 import { deletePhoto, getPhoto, photoId, saveNote, updatePhoto, useBlobUrl, useKidVisual, type KidVisual, type Photo, type SkillNote } from './photos'
 
 export const MAX_VISUAL_SKILLS = 4
 
-/** Foto con su muñeco, ajustada (sin recortar) a una caja de ancho × alto. */
-export function PhotoView({ photo, width, height, pose, bg = '#0F1720' }: { photo: Photo; width: number | string; height: number | string; pose?: Pose | null; bg?: string }) {
+/** Foto con sus marcas, ajustada (sin recortar) a una caja de ancho × alto. */
+export function PhotoView({ photo, width, height, bg = '#0F1720' }: { photo: Photo; width: number | string; height: number | string; bg?: string }) {
   const url = useBlobUrl(photo.blob)
   const H = (1000 * photo.h) / photo.w
-  const p = pose === undefined ? photo.pose : pose
   return (
     <svg width={width} height={height} viewBox={`0 0 1000 ${H}`} preserveAspectRatio="xMidYMid meet" style={{ display: 'block', background: bg }} role="img" aria-label={phaseName(photo.skillId, photo.phase)}>
       {url && <image href={url} x={0} y={0} width={1000} height={H} />}
-      {p && <Figure pose={p} color={photo.color} />}
+      <Marks marks={photo.marks} />
     </svg>
   )
 }
@@ -58,7 +58,7 @@ export function VisualScreen() {
       <Top title="Registro visual" sub={`${kid.name} · ${dateText(s.date)}`} back={`/sesion/${s.id}/informe/${kid.id}`} />
       <main className="content">
         <div className="banner info">
-          Saca cada foto desde el reproductor de la prueba (botón de cámara) y elige la fase. Luego toca la foto para acomodar el muñeco. Las fotos quedan solo en este celular.
+          Saca cada foto desde el reproductor de la prueba (botón de cámara) y elige la fase. Luego toca la foto para marcar con círculos o líneas. Las fotos quedan solo en este celular.
         </div>
         {candidates > MAX_VISUAL_SKILLS && (
           <div className="banner warn">Hay {candidates} habilidades con fotos y en la página entran {MAX_VISUAL_SKILLS}. Desmarca las que no quieras mostrar; si no, van las 4 primeras.</div>
@@ -97,9 +97,8 @@ function SkillCard({ sessionId, kidId, skill, vis, note, inReport }: { sessionId
           return (
             <div key={ph.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
               {p ? (
-                <Link to={`/sesion/${sessionId}/registro/${kidId}/${skill.id}/${ph.id}`} aria-label={`Acomodar muñeco: ${ph.name}`} style={{ borderRadius: 8, overflow: 'hidden', display: 'block', position: 'relative' }}>
+                <Link to={`/sesion/${sessionId}/registro/${kidId}/${skill.id}/${ph.id}`} aria-label={`Marcar foto: ${ph.name}`} style={{ borderRadius: 8, overflow: 'hidden', display: 'block', position: 'relative' }}>
                   <PhotoView photo={p} width="100%" height={92} />
-                  {p.pose === undefined && <span style={{ position: 'absolute', left: 4, bottom: 4, fontSize: 11, fontWeight: 900, background: '#FEF3C7', color: '#92400E', borderRadius: 6, padding: '2px 5px' }}>Sin muñeco aún</span>}
                 </Link>
               ) : (
                 <Link to={`/sesion/${sessionId}/puntuar/${kidId}/${skill.id}`} aria-label={`Sacar foto: ${ph.name}`}
@@ -121,31 +120,27 @@ function SkillCard({ sessionId, kidId, skill, vis, note, inReport }: { sessionId
   )
 }
 
-// ---------------- Pantalla: acomodar el muñeco sobre la foto ----------------
-export function PoseEditor() {
+// ---------------- Pantalla: marcar la foto con círculos/óvalos y líneas ----------------
+export function MarkEditor() {
   const { id = '', kidId = '', skillId = '', phase = '' } = useParams()
   const nav = useNavigate()
   const { kids } = useStore()
   const kid = kids.find((k) => k.id === kidId)
   const skill = skillById(skillId)
   const [photo, setPhoto] = useState<Photo | null | undefined>(undefined)
-  const [pose, setPose] = useState<Pose | null>(null)
-  const [active, setActive] = useState<Joint | null>(null)
-  const [color, setColor] = useState<FigureColor>('dorado')
+  const [marks, setMarks] = useState<Mark[]>([])
+  const [sel, setSel] = useState<string | null>(null)
+  const [style, setStyle] = useState(lastStyle)
   const svgRef = useRef<SVGSVGElement>(null)
-  const [stretching, setStretching] = useState(false)
-  const [moveAll, setMoveAll] = useState(false) // "Mover todo": arrastrar en cualquier parte mueve el muñeco entero
-  // Gestos: un dedo sobre un punto = girar ese tramo; mantener pulsado = estirarlo; dos dedos = agrandar o achicar.
+  const [u, setU] = useState(2) // unidades de foto por píxel de pantalla (para el tamaño de los agarres)
+  // Gestos: un dedo sobre una marca la mueve; sobre un agarre la estira, la redirige o la gira; dos dedos la agrandan y la giran.
   const pointers = useRef(new Map<number, { x: number; y: number }>())
   const gesture = useRef<
-    | { kind: 'joint'; j: Joint; stretch: boolean; x0: number; y0: number }
-    | { kind: 'pinch'; d0: number; base: Pose }
-    | { kind: 'move'; from: [number, number]; base: Pose }
+    | { kind: 'handle'; id: string; h: Handle }
+    | { kind: 'move'; id: string; last: [number, number] }
+    | { kind: 'pinch'; id: string; base: Mark; d0: number; a0: number }
     | null
   >(null)
-  const holdTimer = useRef<number | undefined>(undefined)
-  const clearHold = () => { if (holdTimer.current) { window.clearTimeout(holdTimer.current); holdTimer.current = undefined } }
-  useEffect(() => clearHold, [])
   const back = `/sesion/${id}/registro/${kidId}`
 
   useEffect(() => {
@@ -153,94 +148,91 @@ export function PoseEditor() {
     getPhoto(photoId(id, kidId, skillId, phase)).then((p) => {
       if (!alive) return
       setPhoto(p ?? null)
-      if (!p) return
-      if (p.pose === undefined) {
-        // El muñeco empieza mirando a la derecha; si el niño va hacia el otro lado se usa "Voltear".
-        const start = startPose(skillId, phase, p.w, p.h)
-        const c = p.color ?? lastColor()
-        setPose(start); setColor(c)
-        updatePhoto(p.id, { pose: start, color: c })
-      } else { setPose(p.pose ? normalizePose(p.pose) : null); setColor(p.color ?? 'dorado') }
+      setMarks(p?.marks ?? [])
     }).catch(() => { if (alive) setPhoto(null) })
     return () => { alive = false }
   }, [id, kidId, skillId, phase])
 
   const H = photo ? (1000 * photo.h) / photo.w : 1000
-  const save = (p: Pose | null) => { setPose(p); if (photo) updatePhoto(photo.id, { pose: p }) }
-  const pickColor = (c: FigureColor) => { setColor(c); rememberColor(c); if (photo) updatePhoto(photo.id, { color: c }) }
+  const save = (ms: Mark[]) => { setMarks(ms); if (photo) updatePhoto(photo.id, { marks: ms }) }
+  const selected = marks.find((m) => m.id === sel) ?? null
+  const rotGap = 34 * u
+
   const toSvg = (e: { clientX: number; clientY: number }): [number, number] | null => {
-    const el = svgRef.current, m = el?.getScreenCTM()
-    if (!el || !m) return null
+    const m = svgRef.current?.getScreenCTM()
+    if (!m) return null
     const pt = new DOMPoint(e.clientX, e.clientY).matrixTransform(m.inverse())
     return [pt.x, pt.y]
   }
-  const spread = () => { const [a, b] = [...pointers.current.values()]; return Math.hypot(a.x - b.x, a.y - b.y) || 1 }
+  const twoFingers = () => {
+    const [a, b] = [...pointers.current.values()]
+    return { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, a: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI }
+  }
+  const replace = (m: Mark) => setMarks((ms) => ms.map((x) => (x.id === m.id ? m : x)))
+
   const onDown = (e: RPointerEvent<SVGSVGElement>) => {
-    if (!pose) return
     e.currentTarget.setPointerCapture(e.pointerId)
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    const m = svgRef.current?.getScreenCTM()
+    const uu = m ? 1 / m.a : u
+    if (uu !== u) setU(uu)
     if (pointers.current.size >= 2) {
-      // Segundo dedo: se pasa a pellizcar (se deja de mover el punto).
-      clearHold()
-      gesture.current = { kind: 'pinch', d0: spread(), base: pose }
-      setActive(null); setStretching(false)
+      if (selected) { const t = twoFingers(); gesture.current = { kind: 'pinch', id: selected.id, base: selected, d0: t.d, a0: t.a } }
       return
     }
-    const p = toSvg(e), m = svgRef.current?.getScreenCTM()
-    if (!p || !m) return
-    if (moveAll) { gesture.current = { kind: 'move', from: p, base: pose }; setActive('hip'); return }
-    const reach = 30 / m.a // ~30 px de pantalla para tocar una articulación
-    let best: Joint | null = null, bd = Infinity
-    for (const j of JOINTS) {
-      const d = Math.hypot(pose[j][0] - p[0], pose[j][1] - p[1])
-      // Entre puntos muy cercanos se prefiere la punta del miembro (mano, pie) antes que la cadera.
-      const bias = j === 'hip' ? 1.15 : 1
-      if (d * bias < bd) { bd = d * bias; best = j }
+    const p = toSvg(e)
+    if (!p) return
+    if (selected) {
+      const h = handles(selected, 34 * uu).find((x) => Math.hypot(x.p[0] - p[0], x.p[1] - p[1]) <= 24 * uu)
+      if (h) { gesture.current = { kind: 'handle', id: selected.id, h: h.h }; return }
     }
-    if (!best || bd > reach) return
-    gesture.current = { kind: 'joint', j: best, stretch: false, x0: e.clientX, y0: e.clientY }
-    setActive(best)
-    if (best !== 'hip') {
-      holdTimer.current = window.setTimeout(() => {
-        const g = gesture.current
-        if (g?.kind === 'joint') { g.stretch = true; setStretching(true); try { navigator.vibrate?.(30) } catch { /* sin vibración */ } }
-      }, 450)
-    }
+    // La marca de más arriba (la última) tiene prioridad.
+    const hit = [...marks].reverse().find((mk) => hits(mk, p, 18 * uu))
+    if (hit) { setSel(hit.id); gesture.current = { kind: 'move', id: hit.id, last: p } }
+    else { setSel(null); gesture.current = null }
   }
   const onMove = (e: RPointerEvent<SVGSVGElement>) => {
     if (!pointers.current.has(e.pointerId)) return
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
     const g = gesture.current
-    if (!g || !pose) return
+    if (!g) return
+    const cur = marks.find((x) => x.id === g.id)
+    if (!cur) return
     if (g.kind === 'pinch') {
-      if (pointers.current.size >= 2) setPose(transformPose(g.base, { scale: spread() / g.d0 }))
+      if (pointers.current.size < 2) return
+      const t = twoFingers()
+      replace(pinchMark(g.base, t.d / g.d0, t.a - g.a0))
       return
     }
-    if (g.kind === 'move') {
-      const p = toSvg(e)
-      if (p) setPose(dragJoint(g.base, 'hip', [g.base.hip[0] + p[0] - g.from[0], g.base.hip[1] + p[1] - g.from[1]]))
-      return
-    }
-    // Si el dedo se movió antes de cumplir el tiempo, es un arrastre normal (sin estirar).
-    if (!g.stretch && Math.hypot(e.clientX - g.x0, e.clientY - g.y0) > 8) clearHold()
     const p = toSvg(e)
     if (!p) return
-    setPose(g.stretch ? stretchJoint(pose, g.j, p) : dragJoint(pose, g.j, p))
+    if (g.kind === 'handle') replace(dragHandle(cur, g.h, p))
+    else { replace(moveMark(cur, p[0] - g.last[0], p[1] - g.last[1])); g.last = p }
   }
   const onUp = (e: RPointerEvent<SVGSVGElement>) => {
     pointers.current.delete(e.pointerId)
-    clearHold()
-    if (gesture.current && pose) save(pose)
-    // Al soltar un dedo del pellizco no se sigue moviendo nada hasta volver a tocar.
+    if (gesture.current) save(marks)
     gesture.current = null
-    setActive(null); setStretching(false)
+  }
+
+  const add = (kind: 'ellipse' | 'line') => {
+    const m = kind === 'ellipse' ? newEllipse(H, style) : newLine(H, style)
+    save([...marks, m]); setSel(m.id)
+  }
+  const pick = (patch: { color?: MarkColor; width?: MarkWidth }) => {
+    const next = { ...style, ...patch }
+    setStyle(next); rememberStyle(next)
+    if (selected) save(marks.map((m) => (m.id === selected.id ? { ...m, ...patch } : m)))
   }
 
   if (photo === undefined) return <div className="empty">Cargando…</div>
-  if (!photo || !skill) return (<><Top title="Muñeco" back={back} /><main className="content"><div className="empty">Esta foto ya no está en este celular.</div></main></>)
+  if (!photo || !skill) return (<><Top title="Marcar foto" back={back} /><main className="content"><div className="empty">Esta foto ya no está en este celular.</div></main></>)
 
-  const tool: CSSProperties = { height: 46, minWidth: 46, padding: '0 10px', borderRadius: 10, border: '1.5px solid #CBD5DF', background: '#fff', color: '#1B2733', fontSize: 15, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }
-  const op = (o: Parameters<typeof transformPose>[1]) => { if (pose) save(transformPose(pose, o)) }
+  const tool: CSSProperties = { height: 46, minWidth: 46, padding: '0 10px', borderRadius: 10, border: '1.5px solid #CBD5DF', background: '#fff', color: '#1B2733', fontSize: 15, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }
+  const on: CSSProperties = { border: '2px solid #0A6FA8', background: '#E6F1F8' }
+  const label: CSSProperties = { fontSize: 12, fontWeight: 900, color: 'var(--muted)', width: 52, flex: 'none' }
+  const cur = selected ? { color: selected.color, width: selected.width } : style
+  const hex = MARK_COLORS[cur.color].hex
 
   return (
     <div style={{ minHeight: '100%', display: 'flex', flexDirection: 'column', background: '#0F1720' }}>
@@ -256,55 +248,48 @@ export function PoseEditor() {
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 8, minHeight: 0 }}>
         <svg ref={svgRef} viewBox={`0 0 1000 ${H}`} preserveAspectRatio="xMidYMid meet"
           onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
-          style={{ width: '100%', maxHeight: '62vh', touchAction: 'none', display: 'block' }} role="img" aria-label="Foto con el muñeco">
+          style={{ width: '100%', maxHeight: '58vh', touchAction: 'none', display: 'block', overflow: 'visible' }} role="img" aria-label="Foto con marcas">
           <PhotoImage photo={photo} H={H} />
-          {pose && <Figure pose={pose} active={active} stretching={stretching} editing color={color} />}
+          <Marks marks={marks} />
+          {selected && <MarkHandles m={selected} u={u} rotGap={rotGap} />}
         </svg>
       </div>
 
       <div style={{ background: '#fff', padding: '10px 10px calc(10px + env(safe-area-inset-bottom))', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {pose ? (
-          <>
-            <div style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center' }}>
-              {moveAll ? 'Mover todo activado: arrastra en cualquier parte de la foto para mover el muñeco entero. Toca el botón otra vez para volver a mover puntos.' : 'Arrastra un punto para girar ese tramo; mantenlo pulsado (vibra) y arrastra para estirarlo o acortarlo. Pellizca con dos dedos para agrandar o achicar. La cadera mueve todo el muñeco.'}
-            </div>
-            <div style={{ display: 'flex', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
-              <button style={tool} aria-label="Achicar" onClick={() => op({ scale: 1 / 1.08 })}>−</button>
-              <button style={tool} aria-label="Agrandar" onClick={() => op({ scale: 1.08 })}>+</button>
-              <button style={tool} aria-label="Girar a la izquierda" onClick={() => op({ rotate: -5 })}>⟲</button>
-              <button style={tool} aria-label="Girar a la derecha" onClick={() => op({ rotate: 5 })}>⟳</button>
-              <button style={tool} onClick={() => op({ flip: true })}>⇋ Voltear</button>
-              <button style={{ ...tool, ...(moveAll ? { border: '2px solid #0A6FA8', background: '#E6F1F8', color: '#075A88' } : {}) }} aria-pressed={moveAll} onClick={() => setMoveAll(!moveAll)}>✥ Mover todo</button>
-            </div>
-            <div role="radiogroup" aria-label="Color del muñeco" style={{ display: 'flex', gap: 6 }}>
-              {(Object.keys(COLORS) as FigureColor[]).map((c) => (
-                <button key={c} role="radio" aria-checked={color === c} onClick={() => pickColor(c)}
-                  style={{ ...tool, flex: 1, ...(color === c ? { border: '2px solid #0A6FA8', background: '#E6F1F8' } : {}) }}>
-                  <span aria-hidden="true" style={{ width: 18, height: 18, borderRadius: 9, background: COLORS[c].near, flex: 'none' }} />
-                  <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.1 }}>
-                    {COLORS[c].label}<span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>{COLORS[c].hint}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button style={{ ...tool, flex: 1 }} onClick={() => {
-                const faceLeft = pose.toeN[0] < pose.ankleN[0]
-                const start = startPose(skillId, phase, photo.w, photo.h, faceLeft)
-                // Conserva el lugar y el tamaño actuales del muñeco.
-                const k = Math.hypot(pose.hip[0] - pose.kneeN[0], pose.hip[1] - pose.kneeN[1]) / (Math.hypot(start.hip[0] - start.kneeN[0], start.hip[1] - start.kneeN[1]) || 1)
-                const moved = transformPose(start, { scale: k })
-                save(dragJoint(moved, 'hip', pose.hip))
-              }}>Postura de referencia</button>
-              <button style={{ ...tool, flex: 1 }} onClick={() => save(null)}>Quitar muñeco</button>
-            </div>
-          </>
-        ) : (
-          <button style={{ ...tool, width: '100%' }} onClick={() => save(startPose(skillId, phase, photo.w, photo.h))}>Poner muñeco</button>
-        )}
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'var(--muted)' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 16, height: 3, borderRadius: 2, background: COLORS[color].near, opacity: FIGURE_OPACITY }} />Lado cercano</span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 16, height: 3, borderRadius: 2, background: COLORS[color].far, opacity: FIGURE_OPACITY }} />Lado lejano</span>
+        <div style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center', minHeight: 34 }}>
+          {!selected ? (marks.length ? 'Toca una marca para elegirla, o agrega otra.' : 'Agrega un círculo o una línea.')
+            : selected.type === 'ellipse' ? 'Arrastra el óvalo para moverlo. Los puntos de la derecha y de abajo lo deforman; el de arriba lo gira. Con dos dedos lo agrandas.'
+              : 'Arrastra la línea para moverla. Arrastra un extremo para alargarla o cambiar su dirección.'}
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button style={{ ...tool, flex: 1 }} onClick={() => add('ellipse')}>
+            <svg width="22" height="16" aria-hidden="true"><ellipse cx="11" cy="8" rx="9" ry="6" fill="none" stroke={hex} strokeWidth="2" /></svg>+ Círculo
+          </button>
+          <button style={{ ...tool, flex: 1 }} onClick={() => add('line')}>
+            <svg width="22" height="16" aria-hidden="true"><line x1="3" y1="13" x2="19" y2="3" stroke={hex} strokeWidth="2.5" strokeLinecap="round" /></svg>+ Línea
+          </button>
+        </div>
+        <div role="radiogroup" aria-label="Color" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={label}>Color</span>
+          {(Object.keys(MARK_COLORS) as MarkColor[]).map((c) => (
+            <button key={c} role="radio" aria-checked={cur.color === c} onClick={() => pick({ color: c })} style={{ ...tool, flex: 1, ...(cur.color === c ? on : {}) }}>
+              <span aria-hidden="true" style={{ width: 16, height: 16, borderRadius: 8, background: MARK_COLORS[c].hex }} />{MARK_COLORS[c].label}
+            </button>
+          ))}
+        </div>
+        <div role="radiogroup" aria-label="Grosor" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={label}>Grosor</span>
+          {(Object.keys(MARK_WIDTHS) as MarkWidth[]).map((w, i) => (
+            <button key={w} role="radio" aria-checked={cur.width === w} onClick={() => pick({ width: w })} style={{ ...tool, flex: 1, ...(cur.width === w ? on : {}) }}>
+              <span aria-hidden="true" style={{ width: 18, height: [1.5, 3, 5][i], borderRadius: 3, background: hex }} />{MARK_WIDTHS[w].label}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          {selected && (
+            <button onClick={() => { save(marks.filter((m) => m.id !== selected.id)); setSel(null) }}
+              style={{ ...tool, color: '#C2410C' }}>Borrar marca</button>
+          )}
           <button onClick={async () => { if (window.confirm('¿Borrar esta foto del registro visual?')) { await deletePhoto(photo.id); nav(back) } }}
             style={{ marginLeft: 'auto', border: 'none', background: 'none', color: '#C2410C', fontSize: 13, fontWeight: 900, height: 40 }}>Borrar foto</button>
         </div>
@@ -332,14 +317,8 @@ export function VisualPageBody({ rows, styles }: { rows: VisualRow[]; styles: { 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 24 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <span style={{ fontFamily: SERIF, fontSize: 38, fontWeight: 600, lineHeight: 1, color: INK }}>{VISUAL_TITLE}</span>
-          <span style={{ fontSize: 13, lineHeight: 1.5 }}>Fotos tomadas durante la evaluación, fase por fase. La figura superpuesta muestra la postura de referencia de cada fase.</span>
+          <span style={{ fontSize: 13, lineHeight: 1.5 }}>Fotos tomadas durante la evaluación, fase por fase, con marcas del evaluador.</span>
         </div>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: MUTED, whiteSpace: 'nowrap' }}>
-          {[...new Set(rows.flatMap((r) => r.photos.filter((p) => p.pose).map((p) => p.color ?? 'dorado')))].map((c) => (
-            <svg key={c} width="22" height="10" aria-hidden="true"><line x1="2" y1="5" x2="20" y2="5" stroke={COLORS[c].near} strokeOpacity={FIGURE_OPACITY} strokeWidth="3" strokeLinecap="round" /></svg>
-          ))}
-          Postura de referencia
-        </span>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         {rows.map((r) => (

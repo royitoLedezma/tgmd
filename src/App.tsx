@@ -6,7 +6,7 @@ import { Recorder } from './recorder'
 import { ScoreKids, ScoreSkill } from './scoring'
 import { ResultList, ResultView } from './results'
 import { ReportScreen } from './report'
-import { VisualScreen, PoseEditor } from './visual'
+import { VisualScreen, MarkEditor } from './visual'
 import { BottomNav } from './ui'
 
 function Shell() {
@@ -36,7 +36,7 @@ function Shell() {
         <Route path="/sesion/:id/informe" element={<ReportScreen />} />
         <Route path="/sesion/:id/informe/:kidId" element={<ReportScreen />} />
         <Route path="/sesion/:id/registro/:kidId" element={<VisualScreen />} />
-        <Route path="/sesion/:id/registro/:kidId/:skillId/:phase" element={<PoseEditor />} />
+        <Route path="/sesion/:id/registro/:kidId/:skillId/:phase" element={<MarkEditor />} />
         <Route path="/ajustes" element={<Settings />} />
       </Routes>
       {!fullScreen && <BottomNav />}
