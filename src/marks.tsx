@@ -94,6 +94,19 @@ export function pinchMark(m: Mark, k: number, a: number): Mark {
   return { ...m, x1, y1, x2, y2 }
 }
 
+/** Acompaña a la foto cuando se gira 90° o se voltea: las marcas quedan sobre el mismo lugar.
+ *  H = alto de la foto ANTES del cambio, en unidades de foto. */
+export function turnMarks(marks: Mark[], op: 'izq' | 'der' | 'espejo', H: number): Mark[] {
+  const k = 1000 / H // al girar, el ancho nuevo (1000) corresponde al alto viejo
+  const f = (x: number, y: number): P => op === 'der' ? [1000 - y * k, x * k] : op === 'izq' ? [y * k, (1000 - x) * k] : [1000 - x, y]
+  return marks.map((m) => {
+    if (m.type === 'line') { const [x1, y1] = f(m.x1, m.y1), [x2, y2] = f(m.x2, m.y2); return { ...m, x1, y1, x2, y2 } }
+    const [cx, cy] = f(m.cx, m.cy)
+    if (op === 'espejo') return { ...m, cx, cy, rot: -m.rot }
+    return { ...m, cx, cy, rx: m.rx * k, ry: m.ry * k, rot: m.rot + (op === 'der' ? 90 : -90) }
+  })
+}
+
 // ---------- Dibujo ----------
 /** Una marca dibujada en SVG (unidades de foto). Óvalos sin relleno. */
 export function MarkShape({ m }: { m: Mark }) {

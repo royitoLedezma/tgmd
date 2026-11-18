@@ -7,8 +7,8 @@ import { SKILLS, skillById, type Skill } from './skills'
 import { Top } from './ui'
 import { dateText } from './sessions'
 import { VISUAL_SKILLS, phaseName, phasesOf } from './phases'
-import { MARK_COLORS, MARK_WIDTHS, MarkHandles, Marks, dragHandle, handles, hits, lastStyle, moveMark, newEllipse, newLine, pinchMark, rememberStyle, type Handle, type Mark, type MarkColor, type MarkWidth } from './marks'
-import { deletePhoto, getPhoto, imageFromFile, photoId, savePhoto, saveNote, updatePhoto, useBlobUrl, useKidVisual, type KidVisual, type Photo, type SkillNote } from './photos'
+import { MARK_COLORS, MARK_WIDTHS, MarkHandles, Marks, dragHandle, handles, hits, lastStyle, moveMark, newEllipse, newLine, pinchMark, rememberStyle, turnMarks, type Handle, type Mark, type MarkColor, type MarkWidth } from './marks'
+import { deletePhoto, getPhoto, imageFromFile, photoId, savePhoto, turnImage, type PhotoTurn, saveNote, updatePhoto, useBlobUrl, useKidVisual, type KidVisual, type Photo, type SkillNote } from './photos'
 
 export const MAX_VISUAL_SKILLS = 4
 
@@ -236,6 +236,19 @@ export function MarkEditor() {
     gesture.current = null
   }
 
+  const [turning, setTurning] = useState(false)
+  const turn = async (op: PhotoTurn) => {
+    if (!photo || turning) return
+    setTurning(true)
+    try {
+      const img = await turnImage(photo.blob, op)
+      const ms = turnMarks(marks, op, H)
+      await savePhoto({ sessionId: id, kidId, skillId, phase, ...img, marks: ms })
+      const p = await getPhoto(photo.id)
+      setPhoto(p ?? null); setMarks(p?.marks ?? [])
+    } catch { window.alert('No se pudo girar la foto.') } finally { setTurning(false) }
+  }
+
   const add = (kind: 'ellipse' | 'line') => {
     const m = kind === 'ellipse' ? newEllipse(H, style) : newLine(H, style)
     save([...marks, m]); setSel(m.id)
@@ -281,6 +294,12 @@ export function MarkEditor() {
           {!selected ? (marks.length ? 'Toca una marca para elegirla, o agrega otra.' : 'Agrega un círculo o una línea.')
             : selected.type === 'ellipse' ? 'Arrastra el óvalo para moverlo. Los puntos de la derecha y de abajo lo deforman; el de arriba lo gira. Con dos dedos lo agrandas.'
               : 'Arrastra la línea para moverla. Arrastra un extremo para alargarla o cambiar su dirección.'}
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={label}>Foto</span>
+          <button style={{ ...tool, flex: 1, opacity: turning ? 0.5 : 1 }} disabled={turning} aria-label="Girar la foto a la izquierda" onClick={() => turn('izq')}>⟲ Girar</button>
+          <button style={{ ...tool, flex: 1, opacity: turning ? 0.5 : 1 }} disabled={turning} aria-label="Girar la foto a la derecha" onClick={() => turn('der')}>Girar ⟳</button>
+          <button style={{ ...tool, flex: 1, opacity: turning ? 0.5 : 1 }} disabled={turning} aria-label="Voltear la foto como espejo" onClick={() => turn('espejo')}>⇋ Voltear</button>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
           <button style={{ ...tool, flex: 1 }} onClick={() => add('ellipse')}>

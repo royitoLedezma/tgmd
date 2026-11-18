@@ -82,6 +82,26 @@ export async function imageFromFile(file: File): Promise<{ blob: Blob; w: number
   } finally { URL.revokeObjectURL(url) }
 }
 
+export type PhotoTurn = 'izq' | 'der' | 'espejo'
+/** Gira la imagen 90° a la izquierda o a la derecha, o la voltea como un espejo. */
+export async function turnImage(blob: Blob, op: PhotoTurn): Promise<{ blob: Blob; w: number; h: number }> {
+  const bmp = await createImageBitmap(blob)
+  const { width: w0, height: h0 } = bmp
+  const side = op !== 'espejo'
+  const c = document.createElement('canvas')
+  c.width = side ? h0 : w0; c.height = side ? w0 : h0
+  const g = c.getContext('2d')
+  if (!g) throw new Error('Sin lienzo')
+  if (op === 'der') { g.translate(h0, 0); g.rotate(Math.PI / 2) }
+  else if (op === 'izq') { g.translate(0, w0); g.rotate(-Math.PI / 2) }
+  else { g.translate(w0, 0); g.scale(-1, 1) }
+  g.drawImage(bmp, 0, 0)
+  bmp.close()
+  const out = await new Promise<Blob | null>((r) => c.toBlob(r, 'image/jpeg', 0.92))
+  if (!out) throw new Error('No se pudo girar la imagen')
+  return { blob: out, w: c.width, h: c.height }
+}
+
 export async function updatePhoto(id: string, patch: Partial<Pick<Photo, 'marks'>>) {
   const cur = await tx<Photo | undefined>(['photos'], 'readonly', (t) => t.objectStore('photos').get(id))
   if (!cur) return
